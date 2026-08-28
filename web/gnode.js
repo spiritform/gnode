@@ -269,6 +269,9 @@ const CSS = `
   font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  /* keep thumb reasonable when the preview col is dragged very wide —
+     otherwise aspect-ratio:1 makes it taller than the card and it clips */
+  max-width: 260px;
 }
 .gnode-thumb img {
   width: 100%; height: 100%; object-fit: contain;
@@ -294,11 +297,29 @@ const CSS = `
 }
 .gnode-section:last-child { border-bottom: none; }
 
+/* preview widget row: same grid as normal rows but the value slot holds a thumb.
+   no max-width -> box scales with section width; aspect-ratio:1 keeps it square,
+   image inside letterboxes via object-fit:contain (already the default). */
+.gnode-row .gnode-thumb {
+  max-width: none;
+}
+/* prevent native image drag inside preview thumbs — otherwise it competes
+   with the row's draggable=true and swallows clicks on the hide button */
+.gnode-row .gnode-thumb img {
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
 /* horizontal layout: sections sit side-by-side */
 .gnode-card.horizontal .gnode-body {
   display: flex;
   flex-direction: row;
   align-items: stretch;
+  /* in horizontal, let body stretch to full card height so section border-rights
+     reach the bottom. measureNatural computes section-intrinsic height instead
+     of body.scrollHeight (which would report the stretched height and loop). */
+  align-self: stretch;
 }
 .gnode-card.horizontal .gnode-section {
   flex: 1 1 0;
@@ -324,6 +345,20 @@ const CSS = `
   margin-right: 10px;
   display: inline-block;
   vertical-align: middle;
+  transition: box-shadow 0.15s;
+}
+.gnode-section-dot.executing {
+  animation: gnode-dot-pulse 0.9s ease-in-out infinite;
+}
+@keyframes gnode-dot-pulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.55);
+    filter: brightness(1.6);
+  }
 }
 
 .gnode-row {
@@ -700,7 +735,12 @@ function inferSections(wrappedNodes, grabbedGroups) {
   }
 
   const ungrouped = wrappedNodes.filter(n => !assigned.has(n.id));
-  if (ungrouped.length > 0) {
+  // only spawn the fallback section if the ungrouped nodes actually have
+  // renderable widgets — no point showing an empty "no exposed widgets" bucket
+  const hasVisibleWidget = n =>
+    Array.isArray(n.widgets) &&
+    n.widgets.some(w => w && w.type !== "converted-widget");
+  if (ungrouped.length > 0 && ungrouped.some(hasVisibleWidget)) {
     sections.push({
       title: sections.length === 0 ? "Widgets" : "Misc",
       color: SECTION_COLORS[colorIdx % SECTION_COLORS.length],
@@ -810,7 +850,7 @@ function renderWidgetRow(node, widget) {
 /* ---------- card DOM ---------- */
 
 function isWidgetHidden(node, widget, hiddenList) {
-  return hiddenList.some(h => h.node_id === node.id && h.widget_name === widget.name);
+  return hiddenList.some(h => h.node_id == node.id && h.widget_name === widget.name);
 }
 
 function buildCard(node) {
@@ -878,7 +918,7 @@ function buildCard(node) {
 
   function hideWidget(nodeId, widgetName) {
     const arr = ensureHiddenArray();
-    if (!arr.some(h => h.node_id === nodeId && h.widget_name === widgetName)) {
+    if (!arr.some(h => h.node_id == nodeId && h.widget_name === widgetName)) {
       arr.push({ node_id: nodeId, widget_name: widgetName });
     }
     renderBody();
@@ -888,21 +928,43 @@ function buildCard(node) {
 
   function restoreWidget(nodeId, widgetName) {
     const arr = ensureHiddenArray();
-    const idx = arr.findIndex(h => h.node_id === nodeId && h.widget_name === widgetName);
+    const idx = arr.findIndex(h => h.node_id == nodeId && h.widget_name === widgetName);
     if (idx >= 0) arr.splice(idx, 1);
     renderBody();
     renderPopover();
     node._gnodeSnapToFit?.();
   }
 
+  function isPreviewNode(w) {
+    if (!w || INPUT_TYPES.has(w.type)) return false;
+    const t = String(w.type || "").toLowerCase();
+    return t.includes("preview") || t.includes("saveimage") || "imgs" in w;
+  }
+
   function getSectionOrder(section) {
-    if (Array.isArray(section.widget_order) && section.widget_order.length > 0) {
-      return section.widget_order.slice();
-    }
     const order = [];
+    if (Array.isArray(section.widget_order) && section.widget_order.length > 0) {
+      order.push(...section.widget_order);
+      // migrate: prepend any preview keys missing from a saved order so
+      // previews sit at the top by default for GNODEs from before this change
+      for (const nodeId of section.node_ids || []) {
+        const wrapped = app.graph.getNodeById(nodeId);
+        if (!isPreviewNode(wrapped)) continue;
+        const key = `${nodeId}\u001f__preview__`;
+        if (!order.includes(key)) order.unshift(key);
+      }
+      return order;
+    }
+    // fresh order: previews first (top of section), then widget rows
     for (const nodeId of section.node_ids || []) {
       const wrapped = app.graph.getNodeById(nodeId);
-      if (!wrapped?.widgets) continue;
+      if (isPreviewNode(wrapped)) {
+        order.push(`${nodeId}\u001f__preview__`);
+      }
+    }
+    for (const nodeId of section.node_ids || []) {
+      const wrapped = app.graph.getNodeById(nodeId);
+      if (!wrapped || !Array.isArray(wrapped.widgets)) continue;
       for (const w of wrapped.widgets) {
         if (!w || w.type === "converted-widget") continue;
         order.push(`${nodeId}\u001f${w.name}`);
@@ -1002,13 +1064,34 @@ function buildCard(node) {
         const nodeId = parseInt(key.slice(0, sep), 10);
         const widgetName = key.slice(sep + 1);
         const wrapped = app.graph.getNodeById(nodeId);
-        if (!wrapped?.widgets) continue;
-        const w = wrapped.widgets.find(x => x.name === widgetName);
-        if (!w || w.type === "converted-widget") continue;
-        if (isWidgetHidden(wrapped, w, hidden)) continue;
-        if (skippedInBody.has(`${wrapped.id}\u001f${w.name}`)) continue;
+        if (!wrapped) continue;
 
-        const row = renderWidgetRow(wrapped, w);
+        let row, hideName;
+        if (widgetName === "__preview__") {
+          if (!isPreviewNode(wrapped)) continue;
+          if (hidden.some(h => h.node_id == nodeId && h.widget_name === "__preview__")) continue;
+          row = document.createElement("div");
+          row.className = "gnode-row";
+          const badge = shortSectionLabel(s.title) || "preview";
+          row.innerHTML = `
+            <div class="k">${escapeHtml(badge.toLowerCase())}</div>
+            <div class="v">
+              <div class="gnode-thumb" data-preview-node-id="${wrapped.id}">
+                <span>preview</span>
+              </div>
+            </div>
+          `;
+          hideName = "__preview__";
+        } else {
+          if (!wrapped.widgets) continue;
+          const w = wrapped.widgets.find(x => x.name === widgetName);
+          if (!w || w.type === "converted-widget") continue;
+          if (isWidgetHidden(wrapped, w, hidden)) continue;
+          if (skippedInBody.has(`${wrapped.id}\u001f${w.name}`)) continue;
+          row = renderWidgetRow(wrapped, w);
+          hideName = w.name;
+        }
+
         row.style.setProperty("--accent-color", s.color);
         const sliderTrack = row.querySelector(".gnode-slider");
         if (sliderTrack) sliderTrack.style.setProperty("--accent-color", s.color);
@@ -1023,9 +1106,12 @@ function buildCard(node) {
         hideBtn.className = "gnode-row-hide";
         hideBtn.title = "Hide from card";
         hideBtn.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg>`;
+        // stop mousedown from reaching the row so the row's draggable=true (set
+        // by the drag-handle) doesn't swallow the click on tall preview rows
+        hideBtn.addEventListener("mousedown", e => e.stopPropagation());
         hideBtn.addEventListener("click", e => {
           e.stopPropagation();
-          hideWidget(wrapped.id, w.name);
+          hideWidget(nodeId, hideName);
         });
 
         const dragHandle = document.createElement("div");
@@ -1138,7 +1224,8 @@ function buildCard(node) {
   }
 
   function computeRequiredWidth() {
-    let w = BODY_W;
+    // body width can be widened for horizontal layout — read the CSS var
+    let w = parseInt(el.style.getPropertyValue("--body-w")) || BODY_W;
     if (el.classList.contains("with-inputs")) {
       const iw = parseInt(el.style.getPropertyValue("--iw")) || INPUTS_COL_W;
       w += iw + SEPARATOR_W;
@@ -1317,22 +1404,55 @@ function buildCard(node) {
       if (!looksLikePreview) continue;
 
       const sec = sections.find(s => Array.isArray(s.node_ids) && s.node_ids.includes(id));
-      const latestImg = Array.isArray(w.imgs) && w.imgs.length > 0
-        ? w.imgs[w.imgs.length - 1]
-        : null;
+      // primary source: app.nodeOutputs (raw execution result, populated for all
+      // executed nodes regardless of visibility — w.imgs only fills reliably for
+      // on-screen preview nodes, which ours aren't since we hide them at HIDDEN_POS)
+      const outputImages = app.nodeOutputs?.[id]?.images;
+      let imgSrc = "";
+      if (Array.isArray(outputImages) && outputImages.length > 0) {
+        const im = outputImages[outputImages.length - 1];
+        imgSrc = api.apiURL(
+          `/view?filename=${encodeURIComponent(im.filename)}` +
+          `&subfolder=${encodeURIComponent(im.subfolder || "")}` +
+          `&type=${encodeURIComponent(im.type || "output")}`
+        );
+      } else if (Array.isArray(w.imgs) && w.imgs.length > 0) {
+        imgSrc = w.imgs[w.imgs.length - 1].src;
+      }
       out.push({
         node_id: id,
         badge: shortSectionLabel(sec?.title) || String(w.title || w.type || "preview"),
         color: sec?.color || "#7a7a86",
-        img: latestImg,
+        img: imgSrc ? { src: imgSrc } : null,
       });
     }
     return out;
   }
 
   function renderPreviews() {
-    if (!previewsInner) return;
     const slots = collectPreviewSlots();
+
+    // always update inline preview thumbs living in the section rows
+    const inlineByNodeId = new Map();
+    body.querySelectorAll(".gnode-thumb[data-preview-node-id]").forEach(t => {
+      inlineByNodeId.set(t.dataset.previewNodeId, t);
+    });
+    for (const p of slots) {
+      const thumb = inlineByNodeId.get(String(p.node_id));
+      if (!thumb) continue;
+      thumb.innerHTML = `<div class="badge" style="color:${p.color}">${escapeHtml(p.badge)}</div>`;
+      if (p.img?.src) {
+        const img = document.createElement("img");
+        img.src = p.img.src;
+        thumb.appendChild(img);
+      } else {
+        const placeholder = document.createElement("span");
+        placeholder.textContent = "preview";
+        thumb.appendChild(placeholder);
+      }
+    }
+
+    if (!previewsInner) return;
     // use the same .gnode-input-card structure as the LOAD IMAGE side so
     // label→thumb spacing matches exactly (head padding + card gap identical)
     if (slots.length === 0) {
@@ -1374,6 +1494,29 @@ function buildCard(node) {
   }
   node._gnodeStopPreviewPolling = stopPreviewPolling;
 
+  // pulse the section-dot of whichever wrapped section is currently executing.
+  // comfy emits "executing" events with detail.node (nodeId string) or null (done).
+  function sectionIdxForNodeId(id) {
+    const sections = node.properties.sections || [];
+    return sections.findIndex(s => Array.isArray(s.node_ids) && s.node_ids.includes(id));
+  }
+  function markExecuting(nodeId) {
+    body.querySelectorAll(".gnode-section-dot.executing")
+      .forEach(d => d.classList.remove("executing"));
+    if (nodeId == null) return;
+    const idx = sectionIdxForNodeId(Number(nodeId));
+    if (idx < 0) return;
+    const secEl = body.querySelectorAll(".gnode-section")[idx];
+    secEl?.querySelector(".gnode-section-dot")?.classList.add("executing");
+  }
+  const onExecuting = ({ detail }) => markExecuting(detail);
+  api.addEventListener("executing", onExecuting);
+  const prevRemove = node.onRemoved;
+  node.onRemoved = function () {
+    api.removeEventListener("executing", onExecuting);
+    prevRemove?.call(this);
+  };
+
   // layout toggle (vertical <-> horizontal) — only meaningful with 2+ sections
   const layoutBtn = el.querySelector('[data-act="layout"]');
   const sectionCount = (node.properties.sections || []).length;
@@ -1387,12 +1530,11 @@ function buildCard(node) {
     el.classList.toggle("horizontal", horizontal);
     layoutBtn.classList.toggle("on", horizontal);
     layoutBtn.title = horizontal ? "Switch to vertical layout" : "Switch to horizontal layout";
-    // widen the node for horizontal layout so each section has room
-    const targetW = horizontal
-      ? Math.max(DEFAULT_SIZE[0], sectionCount * 380)
-      : DEFAULT_SIZE[0];
-    node.size[0] = targetW + (el.classList.contains("with-previews") ? 216 : 0);
-    node.setDirtyCanvas?.(true, true);
+    // widen body itself for horizontal so each section has room; leave the side
+    // columns (inputs / previews) at their own widths — computeRequiredWidth sums them.
+    const bodyW = horizontal ? Math.max(BODY_W, sectionCount * 380) : BODY_W;
+    el.style.setProperty("--body-w", `${bodyW}px`);
+    syncNodeWidth(true);
   }
   // restore saved layout on init
   if (node.properties.layout === "horizontal") applyLayout("horizontal");
@@ -1414,6 +1556,7 @@ function buildCard(node) {
       stopPreviewPolling();
     }
   });
+
 
   // draggable right separator: adjusts previews col width via --pw
   const resizeHandle = el.querySelector(".gnode-resize-handle");
@@ -1522,12 +1665,9 @@ function buildCard(node) {
   renderBody();
   renderPopover();
 
-  // auto-open previews column if the wrap includes any preview/save nodes
+  // inline preview rows live in the sections by default — start polling so their
+  // thumbs update after each run. side col is separate (opt-in via the eye button).
   if (collectPreviewSlots().length > 0) {
-    el.classList.add("with-previews");
-    previewBtn.classList.add("on");
-    previewBtn.title = "Hide previews";
-    syncNodeWidth();
     renderPreviews();
     startPreviewPolling();
   }
@@ -1574,6 +1714,8 @@ function wrapSelection() {
     gnode.properties.saved_groups = grabbedGroups;
     gnode.properties.sections = sections;
     gnode.properties.gnode_name = "Untitled";
+    // horizontal layout is the default when there are enough sections to arrange
+    if (sections.length >= 2) gnode.properties.layout = "horizontal";
     app.graph.add(gnode);
 
     app.canvas.selectNodes([gnode]);
@@ -1639,7 +1781,24 @@ app.registerExtension({
             const head = card.querySelector(".gnode-head");
             const body = card.querySelector(".gnode-body");
             const measureNatural = () => {
-              const bodyH = body?.scrollHeight || 0;
+              if (!body) return CARD_MIN_HEIGHT;
+              let bodyH;
+              if (card.classList.contains("horizontal")) {
+                // horizontal: body is stretch-sized, so scrollHeight lies. sum
+                // each section's intrinsic children (padding + head + rows) and
+                // take the tallest section as the natural body height.
+                let max = 0;
+                for (const sec of body.querySelectorAll(".gnode-section")) {
+                  const cs = getComputedStyle(sec);
+                  let h = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+                  for (const child of sec.children) h += child.offsetHeight;
+                  if (h > max) max = h;
+                }
+                bodyH = max || body.scrollHeight;
+              } else {
+                // vertical: body is align-self:flex-start -> scrollHeight = content
+                bodyH = body.scrollHeight;
+              }
               return Math.max(CARD_MIN_HEIGHT, (head?.offsetHeight || 0) + bodyH + 4);
             };
             this.addDOMWidget("gnode_card", "gnode_card", card, {
@@ -1730,17 +1889,27 @@ function listGNodes() {
   return nodes.filter(n => n.type === GNODE_TYPE);
 }
 
-function sendNodesToGNode(sourceNodes, gnode) {
+function sendNodesToGNode(sourceNodes, gnode, targetSection) {
   const props = gnode.properties;
   props.wrapped_ids = Array.isArray(props.wrapped_ids) ? props.wrapped_ids : [];
   props.saved_positions = props.saved_positions || {};
   props.sections = Array.isArray(props.sections) ? props.sections : [];
 
-  // find or create the Misc section
-  let misc = props.sections.find(s => s.title === "Misc");
-  if (!misc) {
-    misc = { title: "Misc", color: "#7a7a86", node_ids: [] };
-    props.sections.push(misc);
+  // resolve target section: caller passes an existing section object, a title
+  // to create/find (e.g. "Misc" or a new name), or nothing (default -> Misc).
+  let section;
+  if (targetSection && typeof targetSection === "object") {
+    section = targetSection;
+  } else {
+    const title = (typeof targetSection === "string" && targetSection.trim()) || "Misc";
+    section = props.sections.find(s => s.title === title);
+    if (!section) {
+      const color = title === "Misc"
+        ? "#7a7a86"
+        : SECTION_COLORS[props.sections.length % SECTION_COLORS.length];
+      section = { title, color, node_ids: [] };
+      props.sections.push(section);
+    }
   }
 
   for (const src of sourceNodes) {
@@ -1750,7 +1919,17 @@ function sendNodesToGNode(sourceNodes, gnode) {
       props.saved_positions[src.id] = [src.pos[0], src.pos[1]];
     }
     src.pos = [...HIDDEN_POS];
-    if (!misc.node_ids.includes(src.id)) misc.node_ids.push(src.id);
+    if (!Array.isArray(section.node_ids)) section.node_ids = [];
+    if (!section.node_ids.includes(src.id)) section.node_ids.push(src.id);
+    // if this section had a frozen widget_order (from wrap/drag), append the
+    // new node's widgets so they actually render
+    if (Array.isArray(section.widget_order) && Array.isArray(src.widgets)) {
+      for (const w of src.widgets) {
+        if (!w || w.type === "converted-widget") continue;
+        const key = `${src.id}\u001f${w.name}`;
+        if (!section.widget_order.includes(key)) section.widget_order.push(key);
+      }
+    }
   }
 
   // ask the target GNODE to rebuild its card
@@ -1771,14 +1950,44 @@ function addSendToGNodeMenuItem(opts, canvas, node) {
     ? `◆ Send to GNODE`
     : `◆ Send ${sources.length} nodes to GNODE`;
 
+  // build submenu of sections for a target GNODE (existing sections + "+ New section...")
+  const buildSectionSubmenu = (g) => {
+    const secs = Array.isArray(g.properties?.sections) ? g.properties.sections : [];
+    const options = secs.map(s => ({
+      content: s.title || "Section",
+      callback: () => sendNodesToGNode(sources, g, s),
+    }));
+    if (options.length > 0) options.push(null);
+    options.push({
+      content: "+ New section…",
+      callback: () => {
+        const name = window.prompt("New section name:", "New");
+        const trimmed = (name || "").trim();
+        if (!trimmed) return;
+        sendNodesToGNode(sources, g, trimmed);
+      },
+    });
+    return { options };
+  };
+
   if (gnodes.length === 1) {
     const g = gnodes[0];
     const gname = g.properties?.gnode_name || "Untitled";
+    const secs = Array.isArray(g.properties?.sections) ? g.properties.sections : [];
     opts.unshift(null);
-    opts.unshift({
-      content: `◆ Send to GNODE · ${gname}`,
-      callback: () => sendNodesToGNode(sources, g),
-    });
+    if (secs.length <= 1) {
+      // single section (or none): drop straight into it / create Misc
+      opts.unshift({
+        content: `◆ Send to GNODE · ${gname}`,
+        callback: () => sendNodesToGNode(sources, g, secs[0]),
+      });
+    } else {
+      opts.unshift({
+        content: `◆ Send to GNODE · ${gname}`,
+        has_submenu: true,
+        submenu: buildSectionSubmenu(g),
+      });
+    }
   } else {
     opts.unshift(null);
     opts.unshift({
@@ -1787,7 +1996,8 @@ function addSendToGNodeMenuItem(opts, canvas, node) {
       submenu: {
         options: gnodes.map(g => ({
           content: g.properties?.gnode_name || "Untitled",
-          callback: () => sendNodesToGNode(sources, g),
+          has_submenu: true,
+          submenu: buildSectionSubmenu(g),
         })),
       },
     });
