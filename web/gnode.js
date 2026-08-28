@@ -378,9 +378,9 @@ const CSS = `
 }
 .gnode-section:last-child { border-bottom: none; }
 
-/* preview row: unlike widget rows, no grid — thumb spans the full section
-   width. controls (× + drag) overlay the top-left corner of the thumb;
-   the section badge sits top-right. */
+/* preview row: unlike widget rows, no grid — thumb sits at the top of the
+   section, controls (× + drag) overlay its top-left corner. thumb width
+   is capped so widening the node doesn't stretch the preview. */
 .gnode-row.is-preview {
   display: block;
   padding: 0;
@@ -389,8 +389,12 @@ const CSS = `
 .gnode-row.is-preview .k { display: none; }
 .gnode-row.is-preview .v { width: 100%; }
 .gnode-row .gnode-thumb {
-  max-width: none;
+  max-width: 400px;
 }
+/* badge chip removed everywhere — inline previews live in their own section
+   header, side-col previews live under the PREVIEW header. no need to
+   re-label the source inside the thumb. */
+.gnode-thumb .badge { display: none; }
 .gnode-row.is-preview .gnode-thumb .badge { display: none; }
 /* preview rows: override widget-row grid placement — put both controls
    inside a small overlay pill in the thumb's top-left corner, hover-reveal */
