@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 
 const EXT_NAME = "gnode.core";
 const GNODE_TYPE = "GNODE";
@@ -173,6 +174,13 @@ const CSS = `
   position: relative;
   display: grid;
   place-items: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.gnode-input-thumb:hover { border-color: var(--line-strong); }
+.gnode-input-thumb.drop-hover {
+  border-color: var(--accent);
+  background: rgba(160,140,255,0.06);
 }
 .gnode-input-thumb img {
   width: 100%; height: 100%; object-fit: contain;
@@ -875,6 +883,7 @@ function buildCard(node) {
     }
     renderBody();
     renderPopover();
+    node._gnodeSnapToFit?.();
   }
 
   function restoreWidget(nodeId, widgetName) {
@@ -883,6 +892,7 @@ function buildCard(node) {
     if (idx >= 0) arr.splice(idx, 1);
     renderBody();
     renderPopover();
+    node._gnodeSnapToFit?.();
   }
 
   function getSectionOrder(section) {
@@ -1167,21 +1177,86 @@ function buildCard(node) {
       const header = (w_node.title || w_node.type || "input")
         .replace(/([a-z])([A-Z])/g, "$1 $2")   // "LoadImage" -> "Load Image"
         .toUpperCase();
-      const latestImg = Array.isArray(w_node.imgs) && w_node.imgs.length > 0
-        ? w_node.imgs[w_node.imgs.length - 1]
-        : null;
-      const imgSrc = latestImg?.src || "";
-      card.innerHTML = `
-        <div class="gnode-input-card-head">${escapeHtml(header)}</div>
-        <div class="gnode-input-thumb">
-          ${imgSrc ? `<img src="${escapeHtml(imgSrc)}"/>` : `<span class="empty">no image</span>`}
-        </div>
-      `;
       // file combo (usually named "image"/"video"/"file")
       const fileWidget = w_node.widgets?.find(x =>
         x && x.type === "combo" &&
         (x.name === "image" || x.name === "file" || x.name === "video" || x.name === "audio")
       );
+      // prefer node.imgs (post-exec preview), else synthesize a /view URL from the
+      // widget value so the thumb updates the moment a file is picked/uploaded
+      const latestImg = Array.isArray(w_node.imgs) && w_node.imgs.length > 0
+        ? w_node.imgs[w_node.imgs.length - 1]
+        : null;
+      let imgSrc = latestImg?.src || "";
+      if (!imgSrc && fileWidget?.name === "image" && fileWidget.value) {
+        const raw = String(fileWidget.value);
+        const slash = raw.lastIndexOf("/");
+        const sub = slash >= 0 ? raw.slice(0, slash) : "";
+        const name = slash >= 0 ? raw.slice(slash + 1) : raw;
+        imgSrc = api.apiURL(
+          `/view?filename=${encodeURIComponent(name)}&type=input&subfolder=${encodeURIComponent(sub)}`
+        );
+      }
+      card.innerHTML = `
+        <div class="gnode-input-card-head">${escapeHtml(header)}</div>
+        <div class="gnode-input-thumb" title="Double-click or drop an image">
+          ${imgSrc ? `<img src="${escapeHtml(imgSrc)}"/>` : `<span class="empty">double-click or drop</span>`}
+        </div>
+      `;
+
+      // double-click to open file picker, drag-drop to load, on the thumb (image inputs only)
+      const thumbEl = card.querySelector(".gnode-input-thumb");
+      const canUpload = fileWidget && fileWidget.name === "image";
+      if (canUpload) {
+        const doUpload = async (file) => {
+          if (!file || !file.type?.startsWith("image/")) return;
+          try {
+            const fd = new FormData();
+            fd.append("image", file, file.name);
+            fd.append("type", "input");
+            fd.append("overwrite", "true");
+            const res = await api.fetchApi("/upload/image", { method: "POST", body: fd });
+            if (!res.ok) throw new Error(`upload ${res.status}`);
+            const data = await res.json();
+            // ComfyUI returns filename in data.name; include subfolder prefix if present
+            const filename = data.subfolder ? `${data.subfolder}/${data.name}` : data.name;
+            const values = fileWidget.options?.values || [];
+            if (!values.includes(filename)) values.push(filename);
+            fileWidget.value = filename;
+            fileWidget.callback?.(filename, app.canvas, w_node);
+            w_node.setDirtyCanvas?.(true, true);
+            setTimeout(renderInputs, 200);
+          } catch (err) {
+            console.error("[GNODE] image upload failed:", err);
+          }
+        };
+        thumbEl.addEventListener("dblclick", e => {
+          e.preventDefault();
+          e.stopPropagation();
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/*";
+          input.addEventListener("change", () => doUpload(input.files?.[0]));
+          input.click();
+        });
+        thumbEl.addEventListener("dragover", e => {
+          if (!e.dataTransfer?.types.includes("Files")) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = "copy";
+          thumbEl.classList.add("drop-hover");
+        });
+        thumbEl.addEventListener("dragleave", () => thumbEl.classList.remove("drop-hover"));
+        thumbEl.addEventListener("drop", e => {
+          e.preventDefault();
+          e.stopPropagation();
+          thumbEl.classList.remove("drop-hover");
+          const file = e.dataTransfer?.files?.[0];
+          if (file) doUpload(file);
+        });
+      } else {
+        thumbEl.style.cursor = "default";
+      }
       // when an input node lives in the left column, hide ALL of its widgets from the body
       // (LoadImage has extra custom widgets like `choose file to upload` and `$$canvas-image-preview`
       // that render badly and don't belong in the params section anyway)
@@ -1258,11 +1333,21 @@ function buildCard(node) {
   function renderPreviews() {
     if (!previewsInner) return;
     const slots = collectPreviewSlots();
+    // use the same .gnode-input-card structure as the LOAD IMAGE side so
+    // label→thumb spacing matches exactly (head padding + card gap identical)
     if (slots.length === 0) {
-      previewsInner.innerHTML = `<div class="gnode-col-label">PREVIEW</div><div class="gnode-empty" style="padding:16px 0">no preview nodes wrapped</div>`;
+      previewsInner.innerHTML = `
+        <div class="gnode-input-card">
+          <div class="gnode-input-card-head">PREVIEW</div>
+          <div class="gnode-empty" style="padding:16px 0">no preview nodes wrapped</div>
+        </div>`;
       return;
     }
-    previewsInner.innerHTML = `<div class="gnode-col-label">PREVIEW</div>`;
+    previewsInner.innerHTML = `
+      <div class="gnode-input-card">
+        <div class="gnode-input-card-head">PREVIEW</div>
+      </div>`;
+    const card = previewsInner.querySelector(".gnode-input-card");
     for (const p of slots) {
       const thumb = document.createElement("div");
       thumb.className = "gnode-thumb";
@@ -1276,7 +1361,7 @@ function buildCard(node) {
         placeholder.textContent = "preview";
         thumb.appendChild(placeholder);
       }
-      previewsInner.appendChild(thumb);
+      card.appendChild(thumb);
     }
   }
 
@@ -1563,26 +1648,29 @@ app.registerExtension({
               getMinHeight: () => measureNatural(),
             });
             // initial fit: snap to natural once, then let the user drag freely
-            const applyInitial = () => {
+            const snapToFit = () => {
               const target = measureNatural();
               this.size[1] = target;
               this.setDirtyCanvas?.(true, true);
             };
-            requestAnimationFrame(() => requestAnimationFrame(applyInitial));
+            requestAnimationFrame(() => requestAnimationFrame(snapToFit));
+            // expose so content-mutating actions (hide row, restore row, reorder, layout flip)
+            // can request an exact re-fit after their render settles
+            this._gnodeSnapToFit = () =>
+              requestAnimationFrame(() => requestAnimationFrame(snapToFit));
 
-            // grow-only observer: if content expands past current node height (e.g. row added,
-            // textarea auto-grew), push the node taller. Never shrink — user's corner-drag wins.
-            const growIfNeeded = () => {
+            // observe body only. body is align-self:flex-start so its size == content
+            // (not the flex-stretched card height), so this fires only when content actually
+            // changes (row added, textarea grew/shrunk) — not on user corner-drag.
+            // snap-to-fit in both directions so shrinking the textarea also collapses the node.
+            const snapOnContentChange = () => {
               const target = measureNatural();
-              if ((this.size?.[1] || 0) < target) {
+              if (Math.abs((this.size?.[1] || 0) - target) > 1) {
                 this.size[1] = target;
                 this.setDirtyCanvas?.(true, true);
               }
             };
-            // observe body only. body is align-self:flex-start so its size == content
-            // (not the flex-stretched card height), so this fires only when content actually
-            // changes (row added, textarea grew) — not on user corner-drag.
-            const ro = new ResizeObserver(growIfNeeded);
+            const ro = new ResizeObserver(snapOnContentChange);
             if (body) ro.observe(body);
             this._gnodeResizeObserver = ro;
 
