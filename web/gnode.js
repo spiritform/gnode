@@ -389,7 +389,7 @@ const CSS = `
 .gnode-row.is-preview .k { display: none; }
 .gnode-row.is-preview .v { width: 100%; }
 .gnode-row .gnode-thumb {
-  max-width: 400px;
+  max-width: none;
 }
 /* badge chip removed everywhere — inline previews live in their own section
    header, side-col previews live under the PREVIEW header. no need to
