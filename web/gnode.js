@@ -2186,7 +2186,8 @@ function buildCard(node) {
     el.classList.add("dragging");
     const onMove = ev => {
       const dx = (ev.clientX - startX) / scale;
-      const next = Math.max(140, startPW + dx);
+      // preview col sits on the RIGHT — moving the separator right shrinks it
+      const next = Math.max(140, startPW - dx);
       el.style.setProperty("--pw", next + "px");
       // don't resize the node — let body flex-shrink absorb the change so
       // only the preview col width shifts
