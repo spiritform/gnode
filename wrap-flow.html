@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GNODE · wrap flow</title>
+<style>
+  :root {
+    --bg: #0b0b0f;
+    --card: #14141a;
+    --card-2: #191921;
+    --line: rgba(255, 255, 255, 0.06);
+    --line-strong: rgba(255, 255, 255, 0.10);
+    --text: #e8e8ee;
+    --muted: #7a7a86;
+    --muted-2: #52525c;
+    --accent-t2i: #6ee7c7;
+    --accent-i2i: #f0a668;
+    --accent-out: #a08cff;
+    --focus: rgba(160, 140, 255, 0.35);
+    --radius: 14px;
+    --radius-sm: 8px;
+    --easing: cubic-bezier(.4,.2,.2,1);
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 20px 40px;
+    background:
+      radial-gradient(900px 500px at 15% -10%, rgba(110, 231, 199, 0.04), transparent 60%),
+      radial-gradient(900px 500px at 90% 110%, rgba(160, 140, 255, 0.05), transparent 60%),
+      var(--bg);
+  }
+
+  /* nav */
+  .nav {
+    width: 100%;
+    max-width: 860px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .brand {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    font-weight: 600;
+  }
+  .brand .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent-out);
+    margin-right: 8px;
+    vertical-align: middle;
+    box-shadow: 0 0 8px rgba(160,140,255,0.6);
+  }
+  .nav a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 11px;
+    letter-spacing: 0.10em;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    transition: 0.15s;
+  }
+  .nav a:hover { color: var(--text); border-color: var(--line-strong); }
+
+  /* stage */
+  .stage {
+    width: 100%;
+    max-width: 860px;
+    height: 520px;
+    background: #0a0a0e;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    position: relative;
+    overflow: hidden;
+    background-image:
+      radial-gradient(circle at 12px 12px, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* group boxes (before wrap) */
+  .grp {
+    position: absolute;
+    border: 1px solid;
+    border-radius: 10px;
+    padding: 26px 14px 14px;
+    background: rgba(0,0,0,0.15);
+    transition: opacity 0.4s var(--easing), transform 0.5s var(--easing), filter 0.5s var(--easing);
+  }
+  .grp .grp-label {
+    position: absolute;
+    top: 6px; left: 12px;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    color: currentColor;
+  }
+  .grp.t2i { color: var(--accent-t2i); border-color: rgba(110,231,199,0.35); }
+  .grp.i2i { color: var(--accent-i2i); border-color: rgba(240,166,104,0.35); }
+
+  .grp-t2i {
+    top: 60px; left: 60px;
+    width: 320px; height: 180px;
+  }
+  .grp-i2i {
+    top: 280px; left: 220px;
+    width: 380px; height: 200px;
+  }
+
+  /* node blocks */
+  .node {
+    position: absolute;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--text);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    white-space: nowrap;
+    transition: opacity 0.4s var(--easing), transform 0.5s var(--easing);
+  }
+  .node .k {
+    display: block;
+    font-size: 8px;
+    color: var(--muted);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .node.t2i { border-left: 2px solid var(--accent-t2i); }
+  .node.i2i { border-left: 2px solid var(--accent-i2i); }
+
+  /* wire svg */
+  .wires {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    transition: opacity 0.4s var(--easing);
+  }
+  .wire {
+    fill: none;
+    stroke: rgba(255,255,255,0.15);
+    stroke-width: 1.2;
+  }
+
+  /* lasso (state: selected) */
+  .lasso {
+    position: absolute;
+    border: 1.5px dashed var(--accent-out);
+    background: rgba(160,140,255,0.05);
+    border-radius: 6px;
+    top: 40px; left: 40px;
+    width: 580px; height: 460px;
+    opacity: 0;
+    transition: opacity 0.35s var(--easing);
+    pointer-events: none;
+  }
+
+  /* context menu (state: menu) */
+  .ctxmenu {
+    position: absolute;
+    top: 210px; left: 380px;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 180px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+    transform-origin: top left;
+    transition: opacity 0.2s var(--easing), transform 0.2s var(--easing);
+    pointer-events: none;
+    z-index: 20;
+  }
+  .ctxmenu .item {
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: default;
+  }
+  .ctxmenu .item.hot {
+    background: rgba(160,140,255,0.14);
+    color: var(--text);
+  }
+  .ctxmenu .item .glyph {
+    font-size: 12px;
+    opacity: 0.9;
+  }
+  .ctxmenu .sep {
+    height: 1px;
+    background: var(--line);
+    margin: 4px 2px;
+  }
+  .ctxmenu .kbd {
+    margin-left: auto;
+    font-size: 9px;
+    color: var(--muted-2);
+    letter-spacing: 0.06em;
+  }
+
+  /* cursor blip */
+  .cursor {
+    position: absolute;
+    width: 10px; height: 10px;
+    top: 200px; left: 372px;
+    pointer-events: none;
+    z-index: 21;
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .cursor::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23fff' stroke='%230b0b0f' stroke-width='1' d='M2 1 L2 12 L5 9 L7 13 L9 12 L7 8 L11 8 Z'/%3E%3C/svg%3E");
+    background-size: contain;
+    background-repeat: no-repeat;
+  }
+
+  /* the resulting gnode card (state: done) */
+  .gnode-preview {
+    position: absolute;
+    top: 60px; left: 210px;
+    width: 380px;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+    opacity: 0;
+    transform: scale(0.94);
+    transition: opacity 0.5s var(--easing), transform 0.5s var(--easing);
+    z-index: 10;
+    pointer-events: none;
+  }
+  .gnode-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    font-weight: 600;
+  }
+  .gnode-head .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent-out);
+    box-shadow: 0 0 8px rgba(160,140,255,0.6);
+  }
+  .gnode-head .sub {
+    color: var(--muted);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+  .gnode-stepper {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--line);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    font-weight: 700;
+  }
+  .gnode-stepper .st {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--muted);
+  }
+  .gnode-stepper .st.t2i { color: var(--accent-t2i); }
+  .gnode-stepper .st .pill {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+  }
+  .gnode-stepper .st.i2i { color: var(--accent-i2i); }
+  .gnode-stepper .st.i2i .pill { box-shadow: none; opacity: 0.5; background: var(--muted-2); }
+  .gnode-stepper .line {
+    flex: 1; height: 1px; background: var(--line-strong);
+  }
+  .gnode-body {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .gnode-row {
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    align-items: center;
+    gap: 10px;
+  }
+  .gnode-row .k {
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .gnode-row .v {
+    height: 24px;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+  }
+  .gnode-foot {
+    padding: 10px 14px;
+    border-top: 1px solid var(--line-strong);
+    background: var(--card-2);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 10px;
+  }
+  .gnode-foot .run {
+    background: var(--text);
+    color: #0b0b0f;
+    padding: 5px 12px;
+    border-radius: 5px;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+  }
+  .gnode-foot .vewd {
+    margin-left: auto;
+    color: var(--accent-out);
+    padding: 2px 8px;
+    background: rgba(160,140,255,0.10);
+    border-radius: 999px;
+    font-size: 9px;
+    letter-spacing: 0.10em;
+  }
+
+  /* ---------------- state machine ---------------- */
+
+  /* state: selected */
+  .stage.state-selected .lasso { opacity: 1; }
+  .stage.state-selected .node { box-shadow: 0 0 0 1.5px var(--accent-out), 0 2px 8px rgba(0,0,0,0.35); }
+
+  /* state: menu (also selected) */
+  .stage.state-menu .lasso { opacity: 1; }
+  .stage.state-menu .node { box-shadow: 0 0 0 1.5px var(--accent-out), 0 2px 8px rgba(0,0,0,0.35); }
+  .stage.state-menu .ctxmenu { opacity: 1; transform: translateY(0) scale(1); }
+  .stage.state-menu .cursor { opacity: 1; }
+
+  /* state: wrapping (transition frame) */
+  .stage.state-wrapping .lasso { opacity: 0; }
+  .stage.state-wrapping .ctxmenu { opacity: 0; transform: translateY(-2px) scale(0.98); }
+  .stage.state-wrapping .cursor { opacity: 0; }
+  .stage.state-wrapping .grp,
+  .stage.state-wrapping .node {
+    opacity: 0;
+    filter: blur(4px);
+    transform: scale(0.9);
+  }
+  .stage.state-wrapping .wires { opacity: 0; }
+  .stage.state-wrapping .gnode-preview { opacity: 1; transform: scale(1); }
+
+  /* state: done */
+  .stage.state-done .grp,
+  .stage.state-done .node,
+  .stage.state-done .wires { opacity: 0; pointer-events: none; }
+  .stage.state-done .gnode-preview { opacity: 1; transform: scale(1); }
+
+  /* ---------------- step controls ---------------- */
+  .steps {
+    width: 100%;
+    max-width: 860px;
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .step-btn {
+    flex: 1;
+    padding: 12px 14px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+    transition: 0.15s;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .step-btn:hover { border-color: var(--line-strong); color: var(--text); }
+  .step-btn.on {
+    border-color: var(--accent-out);
+    background: rgba(160,140,255,0.06);
+    color: var(--text);
+  }
+  .step-btn .n {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--muted-2);
+    font-weight: 700;
+  }
+  .step-btn.on .n { color: var(--accent-out); }
+  .step-btn .t {
+    font-size: 12px;
+  }
+
+  .caption {
+    max-width: 860px;
+    margin: 20px auto 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="nav">
+  <div class="brand"><span class="dot"></span>GNODE · wrap flow</div>
+  <a href="index.html">← card view</a>
+</div>
+
+<div class="stage" id="stage">
+
+  <!-- wires (SVG under nodes) -->
+  <svg class="wires" viewBox="0 0 860 520" preserveAspectRatio="none">
+    <!-- T2I chain -->
+    <path class="wire" d="M 170 130 C 220 130, 220 155, 260 155"/>
+    <path class="wire" d="M 170 180 C 220 180, 220 175, 260 175"/>
+    <path class="wire" d="M 330 165 C 355 165, 355 195, 200 195 C 175 195, 175 215, 200 215"/>
+    <!-- T2I → I2I bridge -->
+    <path class="wire" d="M 260 220 C 260 260, 300 300, 340 325"/>
+    <!-- I2I chain -->
+    <path class="wire" d="M 320 360 C 360 360, 380 360, 420 360"/>
+    <path class="wire" d="M 490 360 C 520 360, 520 390, 550 390"/>
+    <path class="wire" d="M 550 420 C 580 420, 580 445, 550 445"/>
+  </svg>
+
+  <!-- T2I group -->
+  <div class="grp grp-t2i t2i">
+    <div class="grp-label">SD1.5 / SDXL · T2I</div>
+    <div class="node t2i" style="top:110px; left:80px;"><span class="k">ckpt</span>Load Checkpoint</div>
+    <div class="node t2i" style="top:160px; left:80px;"><span class="k">latent</span>Empty Latent</div>
+    <div class="node t2i" style="top:150px; left:260px;"><span class="k">clip</span>CLIP Encode</div>
+    <div class="node t2i" style="top:210px; left:200px;"><span class="k">sample</span>KSampler</div>
+  </div>
+
+  <!-- I2I group -->
+  <div class="grp grp-i2i i2i">
+    <div class="grp-label">Krea2 Turbo · I2I</div>
+    <div class="node i2i" style="top:340px; left:240px;"><span class="k">model</span>Load Diffusion</div>
+    <div class="node i2i" style="top:340px; left:410px;"><span class="k">encode</span>VAE Encode</div>
+    <div class="node i2i" style="top:380px; left:540px;"><span class="k">sample</span>KSampler</div>
+    <div class="node i2i" style="top:435px; left:540px;"><span class="k">decode</span>VAE Decode</div>
+  </div>
+
+  <!-- selection lasso -->
+  <div class="lasso"></div>
+
+  <!-- right-click menu -->
+  <div class="ctxmenu">
+    <div class="item"><span class="glyph">✂</span>Cut<span class="kbd">Ctrl+X</span></div>
+    <div class="item"><span class="glyph">⧉</span>Copy<span class="kbd">Ctrl+C</span></div>
+    <div class="item"><span class="glyph">⌦</span>Delete<span class="kbd">Del</span></div>
+    <div class="sep"></div>
+    <div class="item hot"><span class="glyph" style="color:var(--accent-out)">◆</span>Wrap in GNODE<span class="kbd">G</span></div>
+    <div class="item"><span class="glyph">☰</span>Group</div>
+    <div class="item"><span class="glyph">◱</span>Convert to Subgraph</div>
+  </div>
+
+  <!-- cursor -->
+  <div class="cursor"></div>
+
+  <!-- resulting card (final state) -->
+  <div class="gnode-preview">
+    <div class="gnode-head">
+      <div class="dot"></div>
+      GNODE
+      <div class="sub">· SD → Krea2Turbo</div>
+    </div>
+    <div class="gnode-stepper">
+      <div class="st t2i"><span class="pill"></span>T2I</div>
+      <div class="line"></div>
+      <div class="st i2i"><span class="pill"></span>I2I</div>
+    </div>
+    <div class="gnode-body">
+      <div class="gnode-row"><span class="k">checkpoint</span><span class="v"></span></div>
+      <div class="gnode-row"><span class="k">prompt</span><span class="v" style="height:38px;"></span></div>
+      <div class="gnode-row"><span class="k">steps</span><span class="v"></span></div>
+      <div class="gnode-row"><span class="k">denoise</span><span class="v"></span></div>
+      <div class="gnode-row"><span class="k">seed</span><span class="v"></span></div>
+    </div>
+    <div class="gnode-foot">
+      <span class="run">▶ RUN</span>
+      <span class="vewd">→ vewd</span>
+    </div>
+  </div>
+
+</div>
+
+<div class="steps" id="steps">
+  <button class="step-btn on" data-state="idle"><span class="n">01</span><span class="t">Raw graph</span></button>
+  <button class="step-btn" data-state="selected"><span class="n">02</span><span class="t">Select nodes</span></button>
+  <button class="step-btn" data-state="menu"><span class="n">03</span><span class="t">Right-click</span></button>
+  <button class="step-btn" data-state="wrapping"><span class="n">04</span><span class="t">Wrap</span></button>
+  <button class="step-btn" data-state="done"><span class="n">05</span><span class="t">Card in place</span></button>
+</div>
+
+<div class="caption" id="caption">
+  Raw graph — a normal ComfyUI cluster wired the usual way.
+</div>
+
+<script>
+  const captions = {
+    idle:      "Raw graph — a normal ComfyUI cluster wired the usual way.",
+    selected:  "Marquee-select the nodes you want to collapse.",
+    menu:      "Right-click → \"Wrap in GNODE\" — same menu you already know.",
+    wrapping:  "Underlying nodes fade out (still there, still execute). Card materializes in their place.",
+    done:      "One clean card. Expand any time to see the underlying graph unchanged."
+  };
+
+  const stage = document.getElementById("stage");
+  const buttons = document.querySelectorAll(".step-btn");
+  const caption = document.getElementById("caption");
+
+  function setState(name) {
+    stage.className = "stage state-" + name;
+    buttons.forEach(b => b.classList.toggle("on", b.dataset.state === name));
+    caption.textContent = captions[name];
+  }
+
+  buttons.forEach(b => {
+    b.addEventListener("click", () => setState(b.dataset.state));
+  });
+
+  // gentle autoplay through the states once on load
+  const order = ["idle","selected","menu","wrapping","done"];
+  let i = 0;
+  const auto = setInterval(() => {
+    i++;
+    if (i >= order.length) { clearInterval(auto); return; }
+    setState(order[i]);
+  }, 1400);
+
+  // stop autoplay if user clicks any step
+  buttons.forEach(b => b.addEventListener("click", () => clearInterval(auto)));
+</script>
+
+</body>
+</html>

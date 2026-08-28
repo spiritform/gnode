@@ -1,0 +1,979 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GNODE · SD → Krea2Turbo</title>
+<style>
+  :root {
+    --bg: #0b0b0f;
+    --card: #14141a;
+    --card-2: #191921;
+    --line: rgba(255, 255, 255, 0.06);
+    --line-strong: rgba(255, 255, 255, 0.10);
+    --text: #e8e8ee;
+    --muted: #7a7a86;
+    --muted-2: #52525c;
+    --accent-t2i: #6ee7c7;
+    --accent-i2i: #f0a668;
+    --accent-out: #a08cff;
+    --danger: #ff6b6b;
+    --focus: rgba(160, 140, 255, 0.35);
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    font-size: 13px;
+    letter-spacing: 0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 40px 20px;
+    background:
+      radial-gradient(1000px 600px at 20% -10%, rgba(110, 231, 199, 0.05), transparent 60%),
+      radial-gradient(900px 500px at 90% 110%, rgba(160, 140, 255, 0.06), transparent 60%),
+      var(--bg);
+  }
+
+  /* ------- card shell ------- */
+  .gnode {
+    position: relative;
+    width: 440px;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 20px 60px rgba(0,0,0,0.55),
+      0 2px 6px rgba(0,0,0,0.4);
+    overflow: visible;
+    transition: width 0.28s cubic-bezier(.4,.2,.2,1);
+    --pw: 180px;
+  }
+  .gnode.with-previews { width: calc(440px + var(--pw)); }
+  .gnode.dragging { transition: none; user-select: none; }
+  .gnode.dragging * { user-select: none; }
+
+  .head, .body { position: relative; }
+  .head { border-top-left-radius: var(--radius); border-top-right-radius: var(--radius); }
+
+  .body {
+    display: flex;
+    align-items: stretch;
+    border-bottom-left-radius: var(--radius);
+    border-bottom-right-radius: var(--radius);
+    overflow: hidden;
+  }
+  .body-main { flex: 0 0 auto; width: 440px; min-width: 0; }
+
+  .previews-col {
+    width: 0;
+    border-left: 1px solid var(--line);
+    background: rgba(255,255,255,0.008);
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: width 0.28s cubic-bezier(.4,.2,.2,1);
+  }
+  .gnode.with-previews .previews-col { width: var(--pw); }
+  .gnode.dragging .previews-col { transition: none; }
+
+  /* resize handle on the right edge (only meaningful with previews open) */
+  .resize {
+    position: absolute;
+    top: 8px; bottom: 8px;
+    right: -3px;
+    width: 8px;
+    cursor: ew-resize;
+    opacity: 0;
+    pointer-events: none;
+    transition: 0.15s;
+    z-index: 6;
+    border-radius: 3px;
+  }
+  .gnode.with-previews .resize { pointer-events: auto; }
+  .gnode.with-previews .resize:hover,
+  .gnode.dragging .resize {
+    opacity: 1;
+    background: linear-gradient(to right,
+      transparent 0%,
+      rgba(160,140,255,0.15) 40%,
+      rgba(160,140,255,0.55) 100%);
+  }
+  .previews-inner {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .thumb {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    color: var(--muted-2);
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .thumb .badge {
+    position: absolute;
+    top: 6px; left: 6px;
+    font-size: 8px;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    background: rgba(0,0,0,0.5);
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    backdrop-filter: blur(4px);
+  }
+  .thumb.t2i .badge { color: var(--accent-t2i); }
+  .thumb.i2i .badge { color: var(--accent-i2i); }
+  .previews-hint {
+    font-size: 9px;
+    color: var(--muted-2);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 4px 0;
+  }
+
+  /* ------- header ------- */
+  .head {
+    padding: 14px 18px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand {
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .brand .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent-out);
+    margin-right: 8px;
+    vertical-align: middle;
+    box-shadow: 0 0 8px rgba(160,140,255,0.6);
+  }
+  .title {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .name {
+    outline: none;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: text;
+    transition: 0.15s;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+  .name:hover {
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+  }
+  .name:focus {
+    background: rgba(160,140,255,0.08);
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px rgba(160,140,255,0.35);
+    max-width: none;
+    overflow: visible;
+  }
+  .name:empty::before {
+    content: "untitled";
+    color: var(--muted-2);
+    font-style: italic;
+  }
+  .head-spacer { flex: 1; }
+  .icon-btn {
+    width: 26px; height: 26px;
+    display: grid; place-items: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    transition: 0.15s;
+  }
+  .icon-btn:hover { color: var(--text); background: var(--card-2); border-color: var(--line-strong); }
+
+  /* ------- section run dot ------- */
+  .run-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted-2);
+    margin-right: 10px;
+    vertical-align: middle;
+    transition: 0.2s;
+  }
+  .section.running .run-dot {
+    background: currentColor;
+    box-shadow: 0 0 10px currentColor, 0 0 0 3px rgba(255,255,255,0.03);
+    animation: dot-pulse 1.3s ease-in-out infinite;
+  }
+  .section.done .run-dot {
+    background: currentColor;
+    opacity: 0.6;
+  }
+  @keyframes dot-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* ------- section ------- */
+  .section {
+    padding: 18px 22px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .section:last-of-type { border-bottom: none; }
+  .section-head {
+    display: flex; align-items: center;
+    justify-content: space-between;
+  }
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .section.t2i .section-label { color: var(--accent-t2i); }
+  .section.i2i .section-label { color: var(--accent-i2i); }
+  .section-sub {
+    font-size: 11px;
+    color: var(--muted-2);
+    font-weight: 400;
+  }
+
+  .controls { display: flex; flex-direction: column; gap: 10px; }
+
+  /* ------- row ------- */
+  .row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 16px 66px 1fr;
+    align-items: center;
+    gap: 10px;
+    min-height: 24px;
+  }
+  .row .k {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+  .row .v { position: relative; }
+
+  /* ------- inputs ------- */
+  .field, .select {
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--card-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+    transition: 0.15s;
+  }
+  .field:hover, .select:hover { border-color: var(--line-strong); }
+  .field:focus, .select:focus { border-color: var(--focus); background: #1d1d25; }
+
+  textarea.field {
+    resize: vertical;
+    min-height: 52px;
+    line-height: 1.45;
+    font-family: inherit;
+  }
+
+  .select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%237a7a86' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 26px;
+    cursor: pointer;
+  }
+
+  /* ------- slider ------- */
+  .slider-wrap {
+    display: grid;
+    grid-template-columns: 1fr 38px;
+    align-items: center;
+    gap: 10px;
+  }
+  .slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(to right, var(--track-fill, var(--accent-t2i)) 0%, var(--track-fill, var(--accent-t2i)) var(--pct, 50%), rgba(255,255,255,0.08) var(--pct, 50%), rgba(255,255,255,0.08) 100%);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.4);
+    cursor: grab;
+  }
+  .slider::-moz-range-thumb {
+    width: 12px; height: 12px; border: none;
+    border-radius: 50%; background: #fff;
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.4);
+  }
+  .slider-val {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ------- seed row ------- */
+  .seed { display: grid; grid-template-columns: 1fr 26px; gap: 6px; }
+  .seed .field { font-variant-numeric: tabular-nums; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; }
+
+  /* ------- checkbox ------- */
+  .check {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .check input { display: none; }
+  .check .box {
+    width: 12px; height: 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    display: grid; place-items: center;
+    transition: 0.15s;
+  }
+  .check input:checked + .box {
+    background: var(--accent-i2i);
+    border-color: var(--accent-i2i);
+  }
+  .check input:checked + .box::after {
+    content: "";
+    width: 6px; height: 3px;
+    border: 1.5px solid #14141a;
+    border-top: 0; border-right: 0;
+    transform: translateY(-1px) rotate(-45deg);
+  }
+
+  /* ------- row hide (inline) ------- */
+  .row-toggle {
+    order: -1;
+    width: 16px; height: 16px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: var(--muted-2);
+    cursor: pointer;
+    padding: 0;
+    opacity: 0;
+    transition: 0.12s;
+  }
+  .row-toggle svg { width: 8px; height: 8px; stroke-width: 1.8; }
+  .row:hover .row-toggle { opacity: 0.55; }
+  .row-toggle:hover {
+    opacity: 1 !important;
+    color: var(--danger);
+    background: rgba(255,107,107,0.10);
+  }
+  .row.hidden { display: none; }
+
+  /* ------- hidden widgets popover ------- */
+  .popover-anchor { position: relative; }
+  .popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 240px;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.4);
+    padding: 8px;
+    z-index: 30;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px) scale(0.98);
+    transform-origin: top right;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+  .popover.open {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+  .popover-head {
+    padding: 6px 8px 8px;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 4px;
+  }
+  .popover-body {
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .popover-empty {
+    padding: 20px 8px;
+    text-align: center;
+    color: var(--muted-2);
+    font-size: 11px;
+    font-style: italic;
+  }
+  .hidden-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: 0.12s;
+  }
+  .hidden-item:hover { background: rgba(160,140,255,0.08); }
+  .hidden-item .info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .hidden-item .label {
+    font-size: 12px;
+    color: var(--text);
+  }
+  .hidden-item .src {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .hidden-item.t2i .src { color: var(--accent-t2i); }
+  .hidden-item.i2i .src { color: var(--accent-i2i); }
+  .hidden-item .restore {
+    color: var(--accent-out);
+    font-size: 10px;
+    letter-spacing: 0.10em;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(160,140,255,0.10);
+  }
+
+  /* ------- run pill (in header) ------- */
+  .run {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--text);
+    color: #0b0b0f;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: 0.15s;
+    font-family: inherit;
+  }
+  .run:hover { background: #fff; transform: translateY(-1px); }
+  .run:active { transform: translateY(0); }
+  .run svg { width: 8px; height: 8px; }
+
+  .toggle-btn {
+    width: 28px; height: 28px;
+    display: grid; place-items: center;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  .toggle-btn:hover { color: var(--text); border-color: var(--line-strong); }
+  .toggle-btn.on {
+    color: var(--accent-out);
+    border-color: rgba(160,140,255,0.35);
+    background: rgba(160,140,255,0.08);
+  }
+  .toggle-btn svg { width: 14px; height: 14px; }
+
+  /* thin scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+</style>
+</head>
+<body>
+
+<div class="gnode">
+
+  <!-- header -->
+  <div class="head">
+    <div class="brand"><span class="dot"></span>GNODE</div>
+    <div class="title">
+      <span class="name" contenteditable="true" spellcheck="false" title="Click to rename">SD → Krea2Turbo</span>
+    </div>
+    <div class="head-spacer"></div>
+    <div class="popover-anchor">
+      <button class="toggle-btn" id="settings-toggle" title="Hidden widgets">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="2"/>
+          <path d="M8 1 L8 3 M8 13 L8 15 M1 8 L3 8 M13 8 L15 8 M3 3 L4.5 4.5 M11.5 11.5 L13 13 M3 13 L4.5 11.5 M11.5 4.5 L13 3"/>
+        </svg>
+      </button>
+      <div class="popover" id="hidden-popover">
+        <div class="popover-head">Hidden widgets</div>
+        <div class="popover-body" id="hidden-list"></div>
+      </div>
+    </div>
+    <button class="toggle-btn" id="preview-toggle" title="Show previews">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1.5 8 C 3 4, 5.5 2.5, 8 2.5 C 10.5 2.5, 13 4, 14.5 8 C 13 12, 10.5 13.5, 8 13.5 C 5.5 13.5, 3 12, 1.5 8 Z"/>
+        <circle cx="8" cy="8" r="2.2"/>
+      </svg>
+    </button>
+    <button class="run" title="Queue prompt">
+      <svg viewBox="0 0 10 10" fill="currentColor"><path d="M2 1 L2 9 L9 5 Z"/></svg>
+      RUN
+    </button>
+  </div>
+
+  <div class="body">
+  <div class="body-main">
+
+  <!-- T2I section -->
+  <div class="section t2i running" id="sec-t2i">
+    <div class="section-head">
+      <div class="section-label"><span class="run-dot"></span>T2I · Stable Diffusion</div>
+    </div>
+
+    <div class="controls">
+      <div class="row">
+        <div class="k">checkpoint</div>
+        <div class="v">
+          <select class="select">
+            <option>sd_xl_base_1.0.safetensors</option>
+            <option>sd15_v1.5-pruned.ckpt</option>
+            <option>dreamshaper_xl_v2.safetensors</option>
+          </select>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">prompt</div>
+        <div class="v">
+          <textarea class="field" rows="2">small character, photorealistic, embedding:ghosted</textarea>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">negative</div>
+        <div class="v">
+          <textarea class="field" rows="1">blurry, bad quality</textarea>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">size</div>
+        <div class="v">
+          <select class="select">
+            <option>768 × 768</option>
+            <option>1024 × 1024</option>
+            <option>768 × 1152 (portrait)</option>
+            <option>1152 × 768 (landscape)</option>
+          </select>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">steps</div>
+        <div class="v">
+          <div class="slider-wrap">
+            <input type="range" class="slider" min="1" max="60" value="17" data-accent="t2i" />
+            <div class="slider-val">17</div>
+          </div>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">cfg</div>
+        <div class="v">
+          <div class="slider-wrap">
+            <input type="range" class="slider" min="1" max="15" step="0.1" value="8.1" data-accent="t2i" />
+            <div class="slider-val">8.1</div>
+          </div>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">seed</div>
+        <div class="v">
+          <div class="seed">
+            <input type="text" class="field" value="572578101492955" />
+            <button class="icon-btn" title="Randomize">🎲</button>
+          </div>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">control</div>
+        <div class="v">
+          <select class="select">
+            <option>fixed</option>
+            <option>increment</option>
+            <option>decrement</option>
+            <option>randomize</option>
+          </select>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row hidden">
+        <div class="k">sampler</div>
+        <div class="v">
+          <select class="select"><option>dpmpp_sde_gpu</option><option>euler</option><option>dpmpp_2m</option></select>
+        </div>
+        <button class="row-toggle" title="Restore"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 2 L5 8"/><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row hidden">
+        <div class="k">scheduler</div>
+        <div class="v">
+          <select class="select"><option>sgm_uniform</option><option>normal</option><option>karras</option></select>
+        </div>
+        <button class="row-toggle" title="Restore"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 2 L5 8"/><path d="M2 5 L8 5"/></svg></button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- I2I section -->
+  <div class="section i2i" id="sec-i2i">
+    <div class="section-head">
+      <div class="section-label"><span class="run-dot"></span>I2I · Krea2 Turbo</div>
+    </div>
+
+    <div class="controls">
+      <div class="row">
+        <div class="k">model</div>
+        <div class="v">
+          <select class="select">
+            <option>krea2_turbo_fp8_scaled.safetensors</option>
+            <option>krea2_turbo_bf16.safetensors</option>
+          </select>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">prompt</div>
+        <div class="v">
+          <textarea class="field" rows="2">unique looking character with rope tied around it's face, vintage film photo, hyperrealistic, high quality</textarea>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k"></div>
+        <div class="v">
+          <label class="check">
+            <input type="checkbox" />
+            <span class="box"></span>
+            <span>same as T2I prompt</span>
+          </label>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">denoise</div>
+        <div class="v">
+          <div class="slider-wrap">
+            <input type="range" class="slider" min="0" max="1" step="0.01" value="0.47" data-accent="i2i" />
+            <div class="slider-val">0.47</div>
+          </div>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">steps</div>
+        <div class="v">
+          <div class="slider-wrap">
+            <input type="range" class="slider" min="1" max="30" value="10" data-accent="i2i" />
+            <div class="slider-val">10</div>
+          </div>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">seed</div>
+        <div class="v">
+          <div class="seed">
+            <input type="text" class="field" value="370792735366069" />
+            <button class="icon-btn" title="Randomize">🎲</button>
+          </div>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row">
+        <div class="k">control</div>
+        <div class="v">
+          <select class="select">
+            <option>randomize</option>
+            <option>fixed</option>
+            <option>increment</option>
+            <option>decrement</option>
+          </select>
+        </div>
+        <button class="row-toggle" title="Hide"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M2 5 L8 5"/></svg></button>
+      </div>
+
+      <div class="row hidden">
+        <div class="k">clip</div>
+        <div class="v">
+          <select class="select"><option>qwen3vl_4b_fp8_scaled.safetensors</option></select>
+        </div>
+      </div>
+
+      <div class="row hidden">
+        <div class="k">vae</div>
+        <div class="v">
+          <select class="select"><option>krea_vae.safetensors</option></select>
+        </div>
+      </div>
+
+      <div class="row hidden">
+        <div class="k">cfg</div>
+        <div class="v">
+          <div class="slider-wrap">
+            <input type="range" class="slider" min="1" max="15" step="0.1" value="1.0" data-accent="i2i" />
+            <div class="slider-val">1.0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row hidden">
+        <div class="k">sampler</div>
+        <div class="v">
+          <select class="select"><option>euler</option><option>dpmpp_2m</option></select>
+        </div>
+      </div>
+
+      <div class="row hidden">
+        <div class="k">scheduler</div>
+        <div class="v">
+          <select class="select"><option>normal</option><option>karras</option></select>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  </div><!-- /body-main -->
+
+  <!-- previews column (toggled) -->
+  <div class="previews-col">
+    <div class="previews-inner">
+      <div class="thumb t2i">
+        <div class="badge">T2I</div>
+        preview
+      </div>
+      <div class="thumb i2i">
+        <div class="badge">I2I</div>
+        preview
+      </div>
+    </div>
+  </div>
+
+  </div><!-- /body -->
+
+  <div class="resize" id="resize-handle" title="Drag to resize previews"></div>
+
+</div>
+
+<script>
+  // slider fill + value
+  document.querySelectorAll(".slider").forEach(s => {
+    const paint = () => {
+      const min = +s.min, max = +s.max, v = +s.value;
+      const pct = ((v - min) / (max - min)) * 100;
+      const accent = s.dataset.accent === "i2i"
+        ? getComputedStyle(document.documentElement).getPropertyValue("--accent-i2i")
+        : getComputedStyle(document.documentElement).getPropertyValue("--accent-t2i");
+      s.style.setProperty("--pct", pct + "%");
+      s.style.setProperty("--track-fill", accent.trim());
+      const val = s.parentElement.querySelector(".slider-val");
+      if (val) val.textContent = s.step && s.step.includes(".") ? (+v).toFixed(2) : v;
+    };
+    s.addEventListener("input", paint);
+    paint();
+  });
+
+  // row hide + hidden popover
+  const hiddenList = document.getElementById("hidden-list");
+  const popover = document.getElementById("hidden-popover");
+  const settingsBtn = document.getElementById("settings-toggle");
+
+  function refreshHiddenList() {
+    hiddenList.innerHTML = "";
+    const rows = document.querySelectorAll(".row.hidden");
+    if (rows.length === 0) {
+      hiddenList.innerHTML = '<div class="popover-empty">Nothing hidden</div>';
+      return;
+    }
+    rows.forEach(row => {
+      const section = row.closest(".section");
+      const isT2I = section?.classList.contains("t2i");
+      const cls = isT2I ? "t2i" : "i2i";
+      const src = section?.querySelector(".section-label")?.textContent.trim().replace(/^[·\s]+/, "").split("·")[0].trim() || cls.toUpperCase();
+      const label = row.querySelector(".k")?.textContent.trim() || "widget";
+      const item = document.createElement("div");
+      item.className = "hidden-item " + cls;
+      item.innerHTML = `
+        <div class="info">
+          <span class="label">${label || "(unnamed)"}</span>
+          <span class="src">${src}</span>
+        </div>
+        <span class="restore">+ show</span>
+      `;
+      item.addEventListener("click", () => {
+        row.classList.remove("hidden");
+        refreshHiddenList();
+      });
+      hiddenList.appendChild(item);
+    });
+  }
+
+  document.querySelectorAll(".row-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      btn.closest(".row").classList.add("hidden");
+      refreshHiddenList();
+    });
+  });
+
+  settingsBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    const open = popover.classList.toggle("open");
+    settingsBtn.classList.toggle("on", open);
+  });
+  document.addEventListener("click", e => {
+    if (!popover.contains(e.target) && !settingsBtn.contains(e.target)) {
+      popover.classList.remove("open");
+      settingsBtn.classList.remove("on");
+    }
+  });
+
+  refreshHiddenList();
+
+  // name editing: Enter to commit, no linebreaks
+  const nameEl = document.querySelector(".name");
+  nameEl?.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); nameEl.blur(); }
+  });
+  nameEl?.addEventListener("paste", e => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData("text").replace(/\s+/g, " ");
+    document.execCommand("insertText", false, text);
+  });
+
+  // previews toggle
+  const previewBtn = document.getElementById("preview-toggle");
+  const gnode = document.querySelector(".gnode");
+  previewBtn.addEventListener("click", () => {
+    const on = gnode.classList.toggle("with-previews");
+    previewBtn.classList.toggle("on", on);
+    previewBtn.title = on ? "Hide previews" : "Show previews";
+  });
+
+  // drag to resize preview column
+  const handle = document.getElementById("resize-handle");
+  const MIN_PW = 140, MAX_PW = 520;
+  let dragStartX = 0, dragStartW = 0;
+
+  handle.addEventListener("mousedown", e => {
+    if (!gnode.classList.contains("with-previews")) return;
+    e.preventDefault();
+    dragStartX = e.clientX;
+    dragStartW = parseFloat(getComputedStyle(gnode).getPropertyValue("--pw")) || 180;
+    gnode.classList.add("dragging");
+    document.body.style.cursor = "ew-resize";
+
+    const onMove = ev => {
+      const dx = ev.clientX - dragStartX;
+      const next = Math.min(MAX_PW, Math.max(MIN_PW, dragStartW + dx));
+      gnode.style.setProperty("--pw", next + "px");
+    };
+    const onUp = () => {
+      gnode.classList.remove("dragging");
+      document.body.style.cursor = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  });
+</script>
+
+</body>
+</html>
