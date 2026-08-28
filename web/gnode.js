@@ -625,6 +625,86 @@ const CSS = `
   cursor: pointer;
 }
 
+/* searchable combo: styled like .gnode-select but click opens a fixed-position
+   popover with a search input + filtered list. keeps parent overflow from
+   clipping the dropdown. */
+.gnode-combo { width: 100%; }
+.gnode-combo-btn {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  padding-right: 22px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: 0.15s;
+  outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%237a7a86' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.gnode-combo-btn:hover { border-color: var(--line-strong); }
+.gnode-combo-btn.open {
+  border-color: rgba(160,140,255,0.35);
+  background-color: #1d1d25;
+}
+.gnode-combo-popover {
+  position: fixed;
+  z-index: 10000;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.6);
+  overflow: hidden;
+  display: none;
+}
+.gnode-combo-popover.open { display: block; }
+.gnode-combo-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.gnode-combo-search::placeholder { color: var(--muted-2); }
+.gnode-combo-list {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.gnode-combo-item {
+  padding: 5px 10px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: inherit;
+}
+.gnode-combo-item:hover,
+.gnode-combo-item.active { background: rgba(160,140,255,0.14); color: var(--text); }
+.gnode-combo-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-style: italic;
+}
+
 /* draggable value box replaces the classic slider: click + drag horizontally
    to scrub, dbl-click to type an exact value. background fill visualizes
    the position in [min, max]. shift = fine, ctrl = coarse. */
@@ -975,18 +1055,147 @@ function renderWidgetRow(node, widget) {
   };
 
   if (type === "combo") {
-    const values = widget.options?.values || [];
-    const sel = document.createElement("select");
-    sel.className = "gnode-select";
-    for (const opt of values) {
-      const o = document.createElement("option");
-      o.value = String(opt);
-      o.textContent = String(opt);
-      if (opt === widget.value) o.selected = true;
-      sel.appendChild(o);
-    }
-    sel.addEventListener("change", () => commit(sel.value));
-    v.appendChild(sel);
+    const values = (widget.options?.values || []).map(String);
+    const wrap = document.createElement("div");
+    wrap.className = "gnode-combo";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "gnode-combo-btn";
+    btn.textContent = String(widget.value ?? "");
+    wrap.appendChild(btn);
+
+    let popover = null;
+    let filtered = values.slice();
+    let activeIdx = 0;
+
+    const renderList = (list) => {
+      list.innerHTML = "";
+      if (filtered.length === 0) {
+        const em = document.createElement("div");
+        em.className = "gnode-combo-empty";
+        em.textContent = "no matches";
+        list.appendChild(em);
+        return;
+      }
+      filtered.forEach((val, i) => {
+        const it = document.createElement("div");
+        it.className = "gnode-combo-item" + (i === activeIdx ? " active" : "");
+        it.textContent = val;
+        it.title = val;
+        it.addEventListener("mouseenter", () => {
+          activeIdx = i;
+          list.querySelectorAll(".gnode-combo-item.active").forEach(e => e.classList.remove("active"));
+          it.classList.add("active");
+        });
+        it.addEventListener("mousedown", e => e.preventDefault()); // don't lose search focus
+        it.addEventListener("click", () => pick(val));
+        list.appendChild(it);
+      });
+    };
+
+    const pick = (val) => {
+      btn.textContent = val;
+      commit(val);
+      close();
+    };
+
+    const close = () => {
+      if (!popover) return;
+      popover.remove();
+      popover = null;
+      btn.classList.remove("open");
+      document.removeEventListener("mousedown", onDocMouseDown, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+
+    const onDocMouseDown = (e) => {
+      if (popover && !popover.contains(e.target) && !btn.contains(e.target)) close();
+    };
+
+    const positionPopover = () => {
+      if (!popover) return;
+      const r = btn.getBoundingClientRect();
+      popover.style.width = r.width + "px";
+      popover.style.left = r.left + "px";
+      // decide up vs down based on viewport space
+      const spaceBelow = window.innerHeight - r.bottom;
+      const spaceAbove = r.top;
+      const desired = 320; // rough popover max height
+      if (spaceBelow >= desired || spaceBelow >= spaceAbove) {
+        popover.style.top = (r.bottom + 4) + "px";
+        popover.style.bottom = "";
+      } else {
+        popover.style.top = "";
+        popover.style.bottom = (window.innerHeight - r.top + 4) + "px";
+      }
+    };
+
+    const scrollActiveIntoView = () => {
+      const list = popover?.querySelector(".gnode-combo-list");
+      const el = list?.querySelector(".gnode-combo-item.active");
+      el?.scrollIntoView({ block: "nearest" });
+    };
+
+    const open = () => {
+      if (popover) return;
+      // seed active to the current value if visible
+      filtered = values.slice();
+      activeIdx = Math.max(0, values.indexOf(String(widget.value ?? "")));
+
+      popover = document.createElement("div");
+      popover.className = "gnode-combo-popover open";
+      const search = document.createElement("input");
+      search.type = "text";
+      search.className = "gnode-combo-search";
+      search.placeholder = "search…";
+      const list = document.createElement("div");
+      list.className = "gnode-combo-list";
+      popover.appendChild(search);
+      popover.appendChild(list);
+      document.body.appendChild(popover);
+      renderList(list);
+      positionPopover();
+      requestAnimationFrame(() => scrollActiveIntoView());
+      btn.classList.add("open");
+
+      search.addEventListener("input", () => {
+        const q = search.value.toLowerCase().trim();
+        filtered = q ? values.filter(v => v.toLowerCase().includes(q)) : values.slice();
+        activeIdx = 0;
+        renderList(list);
+      });
+      search.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          activeIdx = Math.min(filtered.length - 1, activeIdx + 1);
+          renderList(list); scrollActiveIntoView();
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          activeIdx = Math.max(0, activeIdx - 1);
+          renderList(list); scrollActiveIntoView();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (filtered[activeIdx] != null) pick(filtered[activeIdx]);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+        }
+      });
+      setTimeout(() => search.focus(), 0);
+
+      document.addEventListener("mousedown", onDocMouseDown, true);
+      window.addEventListener("resize", close);
+      window.addEventListener("scroll", close, true);
+    };
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (popover) close();
+      else open();
+    });
+
+    v.appendChild(wrap);
   } else if (type === "number" || type === "slider") {
     const min = widget.options?.min ?? 0;
     let max = widget.options?.max ?? 100;
@@ -1631,8 +1840,18 @@ function buildCard(node) {
         </div>
       `;
 
-      // double-click to open file picker, drag-drop to load, on the thumb (image inputs only)
+      // adopt the image's aspect ratio once it loads (so a landscape image
+      // gives a shorter thumb, not a big letterboxed square)
       const thumbEl = card.querySelector(".gnode-input-thumb");
+      const imgEl = thumbEl.querySelector("img");
+      if (imgEl) {
+        imgEl.addEventListener("load", () => {
+          if (imgEl.naturalWidth && imgEl.naturalHeight) {
+            thumbEl.style.aspectRatio = `${imgEl.naturalWidth} / ${imgEl.naturalHeight}`;
+          }
+        }, { once: true });
+      }
+      // double-click to open file picker, drag-drop to load, on the thumb (image inputs only)
       const canUpload = fileWidget && fileWidget.name === "image";
       if (canUpload) {
         const doUpload = async (file) => {
@@ -1784,8 +2003,14 @@ function buildCard(node) {
       if (p.img?.src) {
         const img = document.createElement("img");
         img.src = p.img.src;
+        img.addEventListener("load", () => {
+          if (img.naturalWidth && img.naturalHeight) {
+            thumb.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+          }
+        }, { once: true });
         thumb.appendChild(img);
       } else {
+        thumb.style.aspectRatio = "";
         const placeholder = document.createElement("span");
         placeholder.textContent = "preview";
         thumb.appendChild(placeholder);
@@ -1815,8 +2040,14 @@ function buildCard(node) {
       if (p.img?.src) {
         const img = document.createElement("img");
         img.src = p.img.src;
+        img.addEventListener("load", () => {
+          if (img.naturalWidth && img.naturalHeight) {
+            thumb.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+          }
+        }, { once: true });
         thumb.appendChild(img);
       } else {
+        thumb.style.aspectRatio = "";
         const placeholder = document.createElement("span");
         placeholder.textContent = "preview";
         thumb.appendChild(placeholder);
@@ -1914,7 +2145,8 @@ function buildCard(node) {
       const dx = (ev.clientX - startX) / scale;
       const next = Math.max(140, startPW + dx);
       el.style.setProperty("--pw", next + "px");
-      syncNodeWidth(true);
+      // don't resize the node — let body flex-shrink absorb the change so
+      // only the preview col width shifts
     };
     const onUp = () => {
       el.classList.remove("dragging");
@@ -1941,7 +2173,8 @@ function buildCard(node) {
       const dx = (ev.clientX - startX) / scale;
       const next = Math.max(140, Math.min(320, startIW + dx));
       el.style.setProperty("--iw", next + "px");
-      syncNodeWidth(true);
+      // don't resize the node — let body flex-shrink absorb the change so
+      // only the inputs col width shifts
     };
     const onUp = () => {
       el.classList.remove("dragging-inputs");
