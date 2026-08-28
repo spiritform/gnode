@@ -151,7 +151,9 @@ const CSS = `
   align-items: stretch;
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  /* scroll vertically when the user shrinks the node below content height */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 /* body: fills when no side cols; fixed to --body-w when either side col opens */
 .gnode-body {
@@ -166,7 +168,9 @@ const CSS = `
 }
 .gnode-card.with-inputs .gnode-body,
 .gnode-card.with-previews .gnode-body {
-  flex: 0 0 var(--body-w, 460px);
+  /* start at --body-w but allow growing when the user drags the node wider,
+     so extra card-content width absorbs into the body (sections widen) */
+  flex: 1 1 var(--body-w, 460px);
 }
 
 /* previews column: hidden by default; grows to fill extra width when open */
@@ -1528,6 +1532,9 @@ function buildCard(node) {
       node.setDirtyCanvas?.(true, true);
     }
   }
+  // expose so onResize can snap corner-drag back to the required width and
+  // the card stays contained inside the LiteGraph node body.
+  node._gnodeRequiredWidth = computeRequiredWidth;
 
   function renderInputs() {
     if (!inputsInner) return;
@@ -2104,10 +2111,14 @@ app.registerExtension({
               // section padding-bottom already handles bottom breathing room
               return Math.max(CARD_MIN_HEIGHT, (head?.offsetHeight || 0) + bodyH + 4);
             };
+            // expose so onResize can cap max height / snap min at natural
+            this._gnodeMeasureNatural = measureNatural;
             this.addDOMWidget("gnode_card", "gnode_card", card, {
               serialize: false,
               hideOnZoom: false,
-              getMinHeight: () => measureNatural(),
+              // low floor so the user can drag corner to make the card shorter;
+              // card-content has overflow-y:auto so overflow scrolls
+              getMinHeight: () => CARD_MIN_HEIGHT,
             });
             // initial fit: snap to natural once, then let the user drag freely
             const snapToFit = () => {
@@ -2121,27 +2132,24 @@ app.registerExtension({
             this._gnodeSnapToFit = () =>
               requestAnimationFrame(() => requestAnimationFrame(snapToFit));
 
-            // observe body. behavior depends on layout:
-            //   vertical: body is align-self:flex-start so its size == content;
-            //     the observer only fires on real content change -> snap in both
-            //     directions so shrinking a textarea also collapses the node.
-            //   horizontal: body is align-self:stretch so it grows/shrinks with
-            //     the card. that means observer also fires when the USER drags
-            //     the corner -> grow-only so we don't fight the drag.
+            // observe body: only auto-resize when the natural (content) height
+            // actually changes — never fight the user's corner-drag. we track
+            // prevNatural so a user shrinking the card in horizontal (which
+            // also shrinks the stretch-body) doesn't get auto-grown back.
+            let prevNatural = 0;
             const onBodyResize = () => {
               const target = measureNatural();
+              const grew = target > prevNatural + 0.5;
+              const shrunk = target < prevNatural - 0.5;
+              prevNatural = target;
               const current = this.size?.[1] || 0;
-              const horizontal = card.classList.contains("horizontal");
-              if (horizontal) {
-                if (current < target) {
-                  this.size[1] = target;
-                  this.setDirtyCanvas?.(true, true);
-                }
-              } else {
-                if (Math.abs(current - target) > 1) {
-                  this.size[1] = target;
-                  this.setDirtyCanvas?.(true, true);
-                }
+              if (grew && current < target) {
+                this.size[1] = target;
+                this.setDirtyCanvas?.(true, true);
+              } else if (shrunk && current > target) {
+                // content shrunk (row hidden, textarea shrunk) -> collapse to fit
+                this.size[1] = target;
+                this.setDirtyCanvas?.(true, true);
               }
             };
             const ro = new ResizeObserver(onBodyResize);
@@ -2153,6 +2161,24 @@ app.registerExtension({
             console.error("[GNODE] card mount failed:", err);
           }
         });
+      }
+
+      // LiteGraph fires this after any corner-drag.
+      //   width : enforce a minimum (content's required width) but let the
+      //           user grow it — extra space is absorbed by body / preview col
+      //           via flex-grow so no dead colored area appears.
+      //   height: cap at natural (no growing past content) and allow shrinking
+      //           — .gnode-card-content has overflow-y:auto to scroll then.
+      onResize(size) {
+        if (typeof this._gnodeRequiredWidth === "function") {
+          const w = this._gnodeRequiredWidth();
+          if (size[0] < w) size[0] = w;
+        }
+        if (typeof this._gnodeMeasureNatural === "function") {
+          const nat = this._gnodeMeasureNatural();
+          if (size[1] > nat) size[1] = nat;
+        }
+        this.setDirtyCanvas?.(true, true);
       }
 
       onRemoved() {
