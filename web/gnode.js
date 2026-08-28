@@ -35,6 +35,30 @@ function pickRandomNodeColor() {
 /* ---------- styles ---------- */
 
 const CSS = `
+/* fullscreen lightbox opened by double-clicking a preview thumb */
+.gnode-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: gnode-lightbox-in 0.14s ease-out;
+}
+.gnode-lightbox img {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+}
+@keyframes gnode-lightbox-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* thin, dark scrollbars anywhere inside the card (and the DOM-widget scroller
    comfy puts our card into). */
 .gnode-card,
@@ -656,15 +680,18 @@ const CSS = `
   border-color: rgba(160,140,255,0.35);
   background-color: #1d1d25;
 }
+/* popover is appended to <body>, so DON'T use CSS vars from .gnode-card
+   scope — set explicit colors so the background is solid */
 .gnode-combo-popover {
   position: fixed;
   z-index: 10000;
-  background: var(--card);
-  border: 1px solid var(--line-strong);
+  background: #14141a;
+  border: 1px solid rgba(255,255,255,0.10);
   border-radius: 6px;
   box-shadow: 0 16px 40px rgba(0,0,0,0.6);
   overflow: hidden;
   display: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
 }
 .gnode-combo-popover.open { display: block; }
 .gnode-combo-search {
@@ -673,22 +700,23 @@ const CSS = `
   padding: 8px 10px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--line);
-  color: var(--text);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  color: #e8e8ee;
   font-family: inherit;
   font-size: 13px;
   outline: none;
 }
-.gnode-combo-search::placeholder { color: var(--muted-2); }
+.gnode-combo-search::placeholder { color: #52525c; }
 .gnode-combo-list {
   max-height: 280px;
   overflow-y: auto;
   padding: 4px 0;
+  background: #14141a;
 }
 .gnode-combo-item {
   padding: 5px 10px;
   font-size: 13px;
-  color: var(--text);
+  color: #e8e8ee;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -696,11 +724,11 @@ const CSS = `
   font-family: inherit;
 }
 .gnode-combo-item:hover,
-.gnode-combo-item.active { background: rgba(160,140,255,0.14); color: var(--text); }
+.gnode-combo-item.active { background: rgba(160,140,255,0.18); }
 .gnode-combo-empty {
   padding: 12px;
   text-align: center;
-  color: var(--muted-2);
+  color: #52525c;
   font-size: 11px;
   font-style: italic;
 }
@@ -1106,7 +1134,6 @@ function renderWidgetRow(node, widget) {
       btn.classList.remove("open");
       document.removeEventListener("mousedown", onDocMouseDown, true);
       window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
     };
 
     const onDocMouseDown = (e) => {
@@ -1182,11 +1209,10 @@ function renderWidgetRow(node, widget) {
           close();
         }
       });
-      setTimeout(() => search.focus(), 0);
+      setTimeout(() => search.focus({ preventScroll: true }), 0);
 
       document.addEventListener("mousedown", onDocMouseDown, true);
       window.addEventListener("resize", close);
-      window.addEventListener("scroll", close, true);
     };
 
     btn.addEventListener("click", (e) => {
@@ -1653,11 +1679,18 @@ function buildCard(node) {
           row.innerHTML = `
             <div class="k">${escapeHtml(badge.toLowerCase())}</div>
             <div class="v">
-              <div class="gnode-thumb" data-preview-node-id="${wrapped.id}">
+              <div class="gnode-thumb" data-preview-node-id="${wrapped.id}" title="Double-click to view full size">
                 <span>preview</span>
               </div>
             </div>
           `;
+          // double-click opens the preview image full-viewport
+          const previewThumb = row.querySelector(".gnode-thumb");
+          previewThumb.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            const img = previewThumb.querySelector("img");
+            if (img?.src) openLightbox(img.src);
+          });
           hideName = "__preview__";
         } else {
           if (!wrapped.widgets) continue;
@@ -2036,6 +2069,12 @@ function buildCard(node) {
     for (const p of slots) {
       const thumb = document.createElement("div");
       thumb.className = "gnode-thumb";
+      thumb.title = "Double-click to view full size";
+      thumb.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        const im = thumb.querySelector("img");
+        if (im?.src) openLightbox(im.src);
+      });
       thumb.innerHTML = `<div class="badge" style="color:${p.color}">${escapeHtml(p.badge)}</div>`;
       if (p.img?.src) {
         const img = document.createElement("img");
@@ -2252,6 +2291,26 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[c]));
+}
+
+// open a full-viewport lightbox for a preview image. click or Esc to close.
+function openLightbox(src) {
+  if (!src) return;
+  const existing = document.querySelector(".gnode-lightbox");
+  if (existing) existing.remove();
+  const overlay = document.createElement("div");
+  overlay.className = "gnode-lightbox";
+  const img = document.createElement("img");
+  img.src = src;
+  overlay.appendChild(img);
+  const close = () => {
+    overlay.remove();
+    document.removeEventListener("keydown", onKey);
+  };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  overlay.addEventListener("click", close);
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(overlay);
 }
 
 /* ---------- wrap flow ---------- */
