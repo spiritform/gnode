@@ -90,6 +90,7 @@ const CSS = `
 }
 .gnode-head {
   padding: 10px 12px;
+  background: rgba(0,0,0,0.35);
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
@@ -126,9 +127,10 @@ const CSS = `
 }
 .gnode-spacer { flex: 1; }
 .gnode-btn {
-  padding: 5px 10px;
-  background: transparent;
-  border: 1px solid var(--line);
+  height: 26px;
+  padding: 0 12px;
+  background: rgba(255,255,255,0.06);
+  border: none;
   border-radius: 6px;
   color: var(--muted);
   font-size: 10px;
@@ -136,12 +138,14 @@ const CSS = `
   cursor: pointer;
   transition: 0.15s;
   font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.gnode-btn:hover { color: var(--text); border-color: var(--line-strong); }
+.gnode-btn:hover { color: var(--text); background: rgba(255,255,255,0.10); }
 .gnode-btn.primary {
   background: var(--text);
   color: #0b0b0f;
-  border-color: var(--text);
   font-weight: 700;
 }
 .gnode-btn.primary:hover { background: #fff; }
@@ -344,7 +348,7 @@ const CSS = `
   z-index: 1;
 }
 .gnode-section {
-  padding: 14px 20px 20px;
+  padding: 14px 20px 30px;
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
@@ -419,26 +423,54 @@ const CSS = `
   /* fixed height so sections with/without a hidden-chip line up */
   min-height: 22px;
 }
-.gnode-section-actions { margin-left: auto; }
+.gnode-section-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+.gnode-section-move {
+  background: rgba(255,255,255,0.06);
+  border: none;
+  border-radius: 3px;
+  color: var(--muted);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 8px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.gnode-section-head:hover .gnode-section-move { opacity: 0.8; }
+.gnode-section-move:hover { color: var(--text); background: rgba(255,255,255,0.10); opacity: 1; }
 .gnode-section-hidden-btn {
   font-size: 8px;
   letter-spacing: 0.16em;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--muted);
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--line);
-  padding: 3px 8px;
+  background: rgba(255,255,255,0.06);
+  border: none;
+  height: 22px;
+  padding: 0 10px;
   border-radius: 3px;
   white-space: nowrap;
   cursor: pointer;
   transition: 0.12s;
   font-family: inherit;
+  display: inline-flex;
+  align-items: center;
 }
 .gnode-section-hidden-btn:hover {
   color: var(--text);
-  border-color: var(--line-strong);
-  background: rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.10);
 }
 .gnode-section-popover {
   position: absolute;
@@ -492,27 +524,14 @@ const CSS = `
   font-weight: 700;
   color: var(--muted);
 }
-.gnode-section-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--muted-2);
-  margin-right: 10px;
-  display: inline-block;
-  vertical-align: middle;
-  transition: box-shadow 0.15s;
+/* executing pulse on the label itself (dot is gone) — soft glow via
+   text-shadow so it doesn't shift layout while pulsing */
+.gnode-section-label.executing {
+  animation: gnode-label-pulse 0.9s ease-in-out infinite;
 }
-.gnode-section-dot.executing {
-  animation: gnode-dot-pulse 0.9s ease-in-out infinite;
-}
-@keyframes gnode-dot-pulse {
-  0%, 100% {
-    transform: scale(1);
-    filter: brightness(1);
-  }
-  50% {
-    transform: scale(1.55);
-    filter: brightness(1.6);
-  }
+@keyframes gnode-label-pulse {
+  0%, 100% { filter: brightness(1); text-shadow: none; }
+  50%      { filter: brightness(1.4); text-shadow: 0 0 8px currentColor; }
 }
 
 /* stacked cell layout: label on top, value full-width below. controls sit
@@ -565,22 +584,23 @@ const CSS = `
 .gnode-row.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
 .gnode-row.drop-after  { box-shadow: inset 0 -3px 0 0 var(--accent); }
 .gnode-row .k {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--muted);
-  letter-spacing: 0.10em;
+  letter-spacing: 0.08em;
+  font-weight: 700;
   text-transform: uppercase;
   word-break: break-word;
 }
 
 .gnode-input, .gnode-select, .gnode-textarea {
   width: 100%;
-  padding: 5px 8px;
+  padding: 6px 9px;
   background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 5px;
   color: var(--text);
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   outline: none;
   transition: 0.15s;
   box-sizing: border-box;
@@ -612,11 +632,11 @@ const CSS = `
   position: relative;
   width: 100%;
   box-sizing: border-box;
-  padding: 6px 10px;
+  padding: 4px 10px;
   background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text);
   font-family: inherit;
   font-variant-numeric: tabular-nums;
@@ -768,8 +788,8 @@ input.gnode-slider-box {
   width: 26px; height: 26px;
   display: grid;
   place-items: center;
-  background: transparent;
-  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.06);
+  border: none;
   border-radius: 6px;
   color: var(--muted);
   cursor: pointer;
@@ -777,11 +797,10 @@ input.gnode-slider-box {
   transition: 0.15s;
   font-family: inherit;
 }
-.gnode-icon-btn:hover { color: var(--text); border-color: var(--line-strong); }
+.gnode-icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.10); }
 .gnode-icon-btn.on {
   color: var(--accent);
-  border-color: rgba(160,140,255,0.35);
-  background: rgba(160,140,255,0.10);
+  background: rgba(160,140,255,0.14);
 }
 .gnode-icon-btn svg { width: 13px; height: 13px; }
 `;
@@ -900,7 +919,15 @@ function inferSections(wrappedNodes, grabbedGroups) {
   const assigned = new Set();
   let colorIdx = 0;
 
-  for (const g of grabbedGroups) {
+  // sort groups by canvas position (top→left, tie-broken by left→right) so
+  // section columns follow the same reading order as the source workflow
+  const orderedGroups = grabbedGroups.slice().sort((a, b) => {
+    const ay = a.pos?.[1] ?? 0, by = b.pos?.[1] ?? 0;
+    if (ay !== by) return ay - by;
+    return (a.pos?.[0] ?? 0) - (b.pos?.[0] ?? 0);
+  });
+
+  for (const g of orderedGroups) {
     const nodes = g.node_ids
       .map(id => wrappedNodes.find(n => n.id === id))
       .filter(Boolean);
@@ -1311,21 +1338,42 @@ function buildCard(node) {
       const sectionHidden = hidden.filter(h =>
         (s.node_ids || []).some(id => id == h.node_id)
       );
-      const hiddenBtn = sectionHidden.length > 0
-        ? `<div class="gnode-section-actions">
-             <button class="gnode-section-hidden-btn" type="button">+ ${sectionHidden.length} hidden</button>
-             <div class="gnode-section-popover" data-role="section-popover"></div>
-           </div>`
+      const hiddenChip = sectionHidden.length > 0
+        ? `<button class="gnode-section-hidden-btn" type="button">+ ${sectionHidden.length} hidden</button>
+           <div class="gnode-section-popover" data-role="section-popover"></div>`
+        : "";
+      // move-left / move-right chevrons only when there is somewhere to move to
+      const canMoveLeft = sIdx > 0;
+      const canMoveRight = sIdx < sections.length - 1;
+      const moveButtons = (canMoveLeft || canMoveRight)
+        ? `${canMoveLeft ? `<button class="gnode-section-move" data-dir="-1" type="button" title="Move section left">◀</button>` : ""}
+           ${canMoveRight ? `<button class="gnode-section-move" data-dir="1" type="button" title="Move section right">▶</button>` : ""}`
         : "";
       sec.innerHTML = `
         <div class="gnode-section-head">
           <span class="gnode-section-label" style="color:${s.color}">
-            <span class="gnode-section-dot" style="background:${s.color}; box-shadow:0 0 8px ${s.color}"></span>
             ${escapeHtml(s.title.toUpperCase())}
           </span>
-          ${hiddenBtn}
+          <div class="gnode-section-actions">
+            ${moveButtons}
+            ${hiddenChip}
+          </div>
         </div>
       `;
+
+      // wire the move chevrons
+      sec.querySelectorAll(".gnode-section-move").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          const dir = parseInt(btn.dataset.dir, 10);
+          const arr = node.properties.sections;
+          const j = sIdx + dir;
+          if (j < 0 || j >= arr.length) return;
+          [arr[sIdx], arr[j]] = [arr[j], arr[sIdx]];
+          renderBody();
+          node._gnodeSnapToFit?.();
+        });
+      });
 
       // wire the per-section hidden-widgets popover
       if (sectionHidden.length > 0) {
@@ -1793,13 +1841,13 @@ function buildCard(node) {
     return sections.findIndex(s => Array.isArray(s.node_ids) && s.node_ids.includes(id));
   }
   function markExecuting(nodeId) {
-    body.querySelectorAll(".gnode-section-dot.executing")
+    body.querySelectorAll(".gnode-section-label.executing")
       .forEach(d => d.classList.remove("executing"));
     if (nodeId == null) return;
     const idx = sectionIdxForNodeId(Number(nodeId));
     if (idx < 0) return;
     const secEl = body.querySelectorAll(".gnode-section")[idx];
-    secEl?.querySelector(".gnode-section-dot")?.classList.add("executing");
+    secEl?.querySelector(".gnode-section-label")?.classList.add("executing");
   }
   const onExecuting = ({ detail }) => markExecuting(detail);
   api.addEventListener("executing", onExecuting);
@@ -2220,7 +2268,7 @@ function addWrapMenuItem(opts, canvas) {
   if (selected.length < 2) return;
   opts.unshift(null);
   opts.unshift({
-    content: "◆ Wrap in GNODE",
+    content: "⧉ CREATE GNODE",
     callback: () => wrapSelection(),
   });
 }
@@ -2288,8 +2336,8 @@ function addSendToGNodeMenuItem(opts, canvas, node) {
   if (sources.length === 0) return;
 
   const label = sources.length === 1
-    ? `◆ Send to GNODE`
-    : `◆ Send ${sources.length} nodes to GNODE`;
+    ? `⧉ Send to GNODE`
+    : `⧉ Send ${sources.length} nodes to GNODE`;
 
   // build submenu of sections for a target GNODE (existing sections + "+ New section...")
   const buildSectionSubmenu = (g) => {
@@ -2319,12 +2367,12 @@ function addSendToGNodeMenuItem(opts, canvas, node) {
     if (secs.length <= 1) {
       // single section (or none): drop straight into it / create Misc
       opts.unshift({
-        content: `◆ Send to GNODE · ${gname}`,
+        content: `⧉ Send to GNODE · ${gname}`,
         callback: () => sendNodesToGNode(sources, g, secs[0]),
       });
     } else {
       opts.unshift({
-        content: `◆ Send to GNODE · ${gname}`,
+        content: `⧉ Send to GNODE · ${gname}`,
         has_submenu: true,
         submenu: buildSectionSubmenu(g),
       });
