@@ -11,10 +11,47 @@ const SEPARATOR_W = 8;
 const DEFAULT_SIZE = [BODY_W, 320];
 const CARD_MIN_HEIGHT = 220;
 const SECTION_COLORS = ["#6ee7c7", "#f0a668", "#a08cff", "#7ec4ff", "#ffb86c"];
+// pool of pleasant LiteGraph node colors — one is picked at wrap for each GNODE
+const NODE_COLORS = [
+  "#7c5cff", "#4a9eff", "#22d3ee", "#2dd4bf", "#6ee7b7",
+  "#fbbf24", "#fb923c", "#f87171", "#f472b6", "#a855f7",
+];
+function pickRandomNodeColor() {
+  return NODE_COLORS[Math.floor(Math.random() * NODE_COLORS.length)];
+}
 
 /* ---------- styles ---------- */
 
 const CSS = `
+/* thin, dark scrollbars anywhere inside the card (and the DOM-widget scroller
+   comfy puts our card into). */
+.gnode-card,
+.gnode-card * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+.gnode-card ::-webkit-scrollbar,
+.gnode-card::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.gnode-card ::-webkit-scrollbar-track,
+.gnode-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+.gnode-card ::-webkit-scrollbar-thumb,
+.gnode-card::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.16);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.gnode-card ::-webkit-scrollbar-thumb:hover,
+.gnode-card::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.28);
+  background-clip: padding-box;
+}
+
 .gnode-card {
   --card: #14141a;
   --card-2: #191921;
@@ -291,18 +328,49 @@ const CSS = `
   z-index: 1;
 }
 .gnode-section {
-  padding: 12px 16px 14px;
+  padding: 14px 20px 20px;
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
 .gnode-section:last-child { border-bottom: none; }
 
-/* preview widget row: same grid as normal rows but the value slot holds a thumb.
-   no max-width -> box scales with section width; aspect-ratio:1 keeps it square,
-   image inside letterboxes via object-fit:contain (already the default). */
+/* preview row: unlike widget rows, no grid — thumb spans the full section
+   width. controls (× + drag) overlay the top-left corner of the thumb;
+   the section badge sits top-right. */
+.gnode-row.is-preview {
+  display: block;
+  padding: 0;
+  position: relative;
+}
+.gnode-row.is-preview .k { display: none; }
+.gnode-row.is-preview .v { width: 100%; }
 .gnode-row .gnode-thumb {
   max-width: none;
 }
+.gnode-row.is-preview .gnode-thumb .badge { display: none; }
+/* preview rows: override widget-row grid placement — put both controls
+   inside a small overlay pill in the thumb's top-left corner, hover-reveal */
+.gnode-row.is-preview .gnode-row-hide,
+.gnode-row.is-preview .gnode-row-drag {
+  position: absolute;
+  top: 8px;
+  z-index: 2;
+  width: 14px; height: 14px;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  border-radius: 3px;
+  color: var(--text);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.gnode-row.is-preview .gnode-row-hide { left: 8px; }
+.gnode-row.is-preview .gnode-row-drag { left: 26px; }
+.gnode-row.is-preview:hover .gnode-row-hide,
+.gnode-row.is-preview:hover .gnode-row-drag { opacity: 0.9; }
+.gnode-row.is-preview .gnode-row-hide:hover,
+.gnode-row.is-preview .gnode-row-drag:hover { opacity: 1; }
+.gnode-row.is-preview .gnode-row-hide svg { width: 7px; height: 7px; }
+.gnode-row.is-preview .gnode-row-drag svg { width: 7px; height: 10px; }
 /* prevent native image drag inside preview thumbs — otherwise it competes
    with the row's draggable=true and swallows clicks on the hide button */
 .gnode-row .gnode-thumb img {
@@ -329,8 +397,78 @@ const CSS = `
 }
 .gnode-card.horizontal .gnode-section:last-child { border-right: none; }
 .gnode-section-head {
-  display: flex; align-items: center;
+  display: flex; align-items: center; gap: 10px;
   margin-bottom: 10px;
+  position: relative;
+  /* fixed height so sections with/without a hidden-chip line up */
+  min-height: 22px;
+}
+.gnode-section-actions { margin-left: auto; }
+.gnode-section-hidden-btn {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: 0.12s;
+  font-family: inherit;
+}
+.gnode-section-hidden-btn:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: rgba(255,255,255,0.06);
+}
+.gnode-section-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+  padding: 6px;
+  z-index: 20;
+  display: none;
+}
+.gnode-section-popover.open { display: block; }
+.gnode-section-popover .item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  gap: 8px;
+}
+.gnode-section-popover .item:hover { background: rgba(255,255,255,0.04); }
+.gnode-section-popover .item .plus {
+  width: 14px; height: 14px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1;
+  transition: color 0.12s;
+}
+.gnode-section-popover .item:hover .plus { color: var(--accent); }
+.gnode-section-popover .item .name {
+  font-size: 11px;
+  color: var(--text);
+}
+.gnode-section-popover .item .src {
+  font-size: 9px;
+  color: var(--muted-2);
+  margin-left: 4px;
 }
 .gnode-section-label {
   font-size: 10px;
@@ -361,22 +499,30 @@ const CSS = `
   }
 }
 
+/* stacked cell layout: label on top, value full-width below. controls sit
+   OUTSIDE the row's content column, floating in the section's left gutter
+   (via negative absolute) so the value box aligns with preview rows. */
 .gnode-row {
-  display: grid;
-  grid-template-columns: 34px 100px 1fr;
-  align-items: center;
-  gap: 12px;
-  min-height: 24px;
-  margin-bottom: 8px;
+  display: block;
+  padding: 2px 0;
+  margin-bottom: 10px;
   position: relative;
 }
-.gnode-row-controls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 100%;
-  justify-content: flex-start;
+.gnode-row .k { display: block; }
+.gnode-row .v { display: block; position: relative; margin-top: 4px; }
+.gnode-row .gnode-row-hide,
+.gnode-row .gnode-row-drag {
+  position: absolute;
+  left: -16px;
+  opacity: 0;
+  transition: opacity 0.12s;
 }
+.gnode-row .gnode-row-hide { top: 0; }
+.gnode-row .gnode-row-drag { top: 22px; }
+.gnode-row:hover .gnode-row-hide,
+.gnode-row:hover .gnode-row-drag { opacity: 0.7; }
+.gnode-row .gnode-row-hide:hover,
+.gnode-row .gnode-row-drag:hover { opacity: 1; }
 .gnode-row-drag {
   width: 12px;
   height: 18px;
@@ -389,23 +535,26 @@ const CSS = `
   border-radius: 3px;
   user-select: none;
 }
-.gnode-row-drag svg { width: 8px; height: 14px; pointer-events: none; }
+.gnode-row-drag svg { width: 8px; height: 18px; pointer-events: none; }
 .gnode-row:hover .gnode-row-drag { opacity: 0.75; }
 .gnode-row-drag:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+/* dragged row stays in place (dimmed) so neighbors never shift. an overlay
+   indicator on the target row shows where the drop will land. */
 .gnode-row.dragging {
-  opacity: 0.25;
+  opacity: 0.28;
   background: rgba(160,140,255,0.06);
   border-radius: 5px;
+  pointer-events: none;
 }
-.gnode-row.dragging .gnode-row-drag { cursor: grabbing; opacity: 1; }
-.gnode-row { transition: transform 0.15s ease; }
+.gnode-row.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
+.gnode-row.drop-after  { box-shadow: inset 0 -3px 0 0 var(--accent); }
 .gnode-row .k {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
   word-break: break-word;
 }
-.gnode-row .v { position: relative; }
 
 .gnode-input, .gnode-select, .gnode-textarea {
   width: 100%;
@@ -440,35 +589,49 @@ const CSS = `
   cursor: pointer;
 }
 
-.gnode-slider-wrap {
-  display: grid;
-  grid-template-columns: 1fr 40px;
-  align-items: center;
-  gap: 8px;
-}
-.gnode-slider {
-  -webkit-appearance: none;
-  appearance: none;
+/* draggable value box replaces the classic slider: click + drag horizontally
+   to scrub, dbl-click to type an exact value. background fill visualizes
+   the position in [min, max]. shift = fine, ctrl = coarse. */
+.gnode-slider-box {
+  position: relative;
   width: 100%;
-  height: 3px;
-  background: linear-gradient(to right, var(--accent-color, var(--accent)) 0%, var(--accent-color, var(--accent)) var(--pct, 50%), rgba(255,255,255,0.08) var(--pct, 50%));
-  border-radius: 2px;
-  outline: none;
-  cursor: pointer;
-}
-.gnode-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 0 2px rgba(0,0,0,0.4);
-}
-.gnode-slider-val {
-  text-align: right;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text);
+  font-family: inherit;
   font-variant-numeric: tabular-nums;
-  font-size: 10px;
-  color: var(--muted);
+  text-align: center;
+  cursor: ew-resize;
+  user-select: none;
+  overflow: hidden;
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.gnode-slider-box::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: var(--pct, 0%);
+  background: var(--accent-color, var(--accent));
+  opacity: 0.22;
+  pointer-events: none;
+  transition: width 0.05s linear;
+}
+.gnode-slider-box > .val {
+  position: relative;
+  z-index: 1;
+}
+.gnode-slider-box:hover,
+.gnode-slider-box.dragging { border-color: var(--line-strong); }
+.gnode-slider-box.dragging { background: rgba(255,255,255,0.02); }
+/* when replaced with an input for typing */
+input.gnode-slider-box {
+  cursor: text;
+  text-align: center;
 }
 
 .gnode-check {
@@ -785,27 +948,81 @@ function renderWidgetRow(node, widget) {
     const min = widget.options?.min ?? 0;
     const max = widget.options?.max ?? 100;
     const step = widget.options?.step ?? 1;
-    // sliders for bounded ranges, plain input for open ranges
     const bounded = isFinite(min) && isFinite(max) && (max - min) < 1e9;
     if (bounded) {
-      const wrap = document.createElement("div");
-      wrap.className = "gnode-slider-wrap";
-      const sl = document.createElement("input");
-      sl.type = "range";
-      sl.className = "gnode-slider";
-      sl.min = min; sl.max = max; sl.step = step;
-      sl.value = widget.value;
-      const val = document.createElement("div");
-      val.className = "gnode-slider-val";
+      const box = document.createElement("div");
+      box.className = "gnode-slider-box";
+      box.tabIndex = 0;
+      const label = document.createElement("span");
+      label.className = "val";
+      box.appendChild(label);
+      let current = Number(widget.value);
+      const decimals = step < 1 ? Math.min(4, String(step).split(".")[1]?.length || 2) : 0;
+      const format = n => decimals > 0 ? Number(n).toFixed(decimals) : String(Math.round(n));
+      const clamp = n => Math.max(min, Math.min(max, n));
+      const snap = n => (step > 0 ? Math.round(n / step) * step : n);
       const paint = () => {
-        const pct = ((sl.value - min) / (max - min)) * 100;
-        sl.style.setProperty("--pct", pct + "%");
-        val.textContent = step < 1 ? Number(sl.value).toFixed(2) : sl.value;
+        const pct = ((current - min) / (max - min)) * 100;
+        box.style.setProperty("--pct", pct + "%");
+        label.textContent = format(current);
       };
-      sl.addEventListener("input", () => { paint(); commit(parseFloat(sl.value)); });
       paint();
-      wrap.appendChild(sl); wrap.appendChild(val);
-      v.appendChild(wrap);
+      // drag-to-scrub with pointer capture
+      let dragging = false, startX = 0, startVal = 0, moved = false;
+      box.addEventListener("pointerdown", e => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        dragging = true; moved = false;
+        startX = e.clientX; startVal = current;
+        try { box.setPointerCapture(e.pointerId); } catch {}
+        box.classList.add("dragging");
+      });
+      box.addEventListener("pointermove", e => {
+        if (!dragging) return;
+        const dx = e.clientX - startX;
+        if (Math.abs(dx) > 2) moved = true;
+        // per-pixel scrub value: scales gently with the range so a 0..1 slider
+        // and a 0..10000 slider both feel usable. floor at `step` so we never
+        // move less than one tick. shift = fine (0.1x), ctrl = coarse (10x).
+        const speed = e.shiftKey ? 0.1 : (e.ctrlKey ? 10 : 1);
+        const perPixel = Math.max(step, (max - min) / 500);
+        const delta = dx * perPixel * speed;
+        const next = snap(clamp(startVal + delta));
+        if (next !== current) { current = next; paint(); commit(current); }
+      });
+      const endDrag = e => {
+        if (!dragging) return;
+        dragging = false;
+        try { box.releasePointerCapture(e.pointerId); } catch {}
+        box.classList.remove("dragging");
+      };
+      box.addEventListener("pointerup", endDrag);
+      box.addEventListener("pointercancel", endDrag);
+      // dbl-click swaps in a text input for exact entry
+      box.addEventListener("dblclick", e => {
+        if (moved) return;
+        e.stopPropagation();
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "gnode-slider-box";
+        input.value = format(current);
+        box.replaceWith(input);
+        input.focus(); input.select();
+        const done = keep => {
+          if (keep) {
+            const n = parseFloat(input.value);
+            if (!isNaN(n)) { current = snap(clamp(n)); commit(current); }
+          }
+          input.replaceWith(box);
+          paint();
+        };
+        input.addEventListener("blur", () => done(true));
+        input.addEventListener("keydown", ev => {
+          if (ev.key === "Enter") { ev.preventDefault(); done(true); }
+          else if (ev.key === "Escape") { ev.preventDefault(); done(false); }
+        });
+      });
+      v.appendChild(box);
     } else {
       const inp = document.createElement("input");
       inp.type = "text";
@@ -876,18 +1093,6 @@ function buildCard(node) {
           <circle cx="8" cy="8" r="2.2"/>
         </svg>
       </button>
-      <div class="gnode-popover-anchor">
-        <button class="gnode-icon-btn" data-act="settings" title="Hidden widgets">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="8" cy="8" r="2"/>
-            <path d="M8 1 L8 3 M8 13 L8 15 M1 8 L3 8 M13 8 L15 8 M3 3 L4.5 4.5 M11.5 11.5 L13 13 M3 13 L4.5 11.5 M11.5 4.5 L13 3"/>
-          </svg>
-        </button>
-        <div class="gnode-popover" data-role="popover">
-          <div class="gnode-popover-head">Hidden widgets</div>
-          <div class="gnode-popover-body"></div>
-        </div>
-      </div>
       <button class="gnode-btn" data-act="expand">EXPAND</button>
       <button class="gnode-btn primary" data-act="run">▶ RUN</button>
     </div>
@@ -905,9 +1110,13 @@ function buildCard(node) {
   `;
 
   const body = el.querySelector(".gnode-body");
-  const popover = el.querySelector('[data-role="popover"]');
-  const popoverBody = popover.querySelector(".gnode-popover-body");
-  const settingsBtn = el.querySelector('[data-act="settings"]');
+  // click anywhere outside a section popover closes it
+  el.addEventListener("click", e => {
+    if (e.target.closest(".gnode-section-hidden-btn")) return;
+    if (e.target.closest(".gnode-section-popover")) return;
+    body.querySelectorAll(".gnode-section-popover.open")
+      .forEach(p => p.classList.remove("open"));
+  });
 
   function ensureHiddenArray() {
     if (!Array.isArray(node.properties.hidden_widgets)) {
@@ -941,17 +1150,45 @@ function buildCard(node) {
     return t.includes("preview") || t.includes("saveimage") || "imgs" in w;
   }
 
+  // widgets we don't want as rows: converted-to-socket, comfy-internal ($$…),
+  // and button-typed widgets (e.g. LoadImage's "choose file to upload").
+  function isRenderableWidget(w) {
+    if (!w || !w.name) return false;
+    if (w.type === "converted-widget") return false;
+    if (w.type === "button") return false;
+    if (String(w.name).startsWith("$$")) return false;
+    return true;
+  }
+
   function getSectionOrder(section) {
     const order = [];
     if (Array.isArray(section.widget_order) && section.widget_order.length > 0) {
-      order.push(...section.widget_order);
-      // migrate: prepend any preview keys missing from a saved order so
-      // previews sit at the top by default for GNODEs from before this change
+      // strip any previously-saved keys that point at now-filtered widgets
+      // (older GNODEs may have $$canvas-image-preview etc. baked into the order)
+      for (const key of section.widget_order) {
+        const sep = key.indexOf("\u001f");
+        if (sep < 0) continue;
+        const wName = key.slice(sep + 1);
+        if (wName.startsWith("$$")) continue;
+        order.push(key);
+      }
+      // migrate: re-append any renderable widget/preview keys that exist on
+      // wrapped nodes but aren't in the saved order (e.g. hidden rows get
+      // dropped by commitDomOrder during a drag and would otherwise be orphaned).
       for (const nodeId of section.node_ids || []) {
         const wrapped = app.graph.getNodeById(nodeId);
-        if (!isPreviewNode(wrapped)) continue;
-        const key = `${nodeId}\u001f__preview__`;
-        if (!order.includes(key)) order.unshift(key);
+        if (!wrapped) continue;
+        if (Array.isArray(wrapped.widgets)) {
+          for (const w of wrapped.widgets) {
+            if (!isRenderableWidget(w)) continue;
+            const key = `${nodeId}\u001f${w.name}`;
+            if (!order.includes(key)) order.push(key);
+          }
+        }
+        if (isPreviewNode(wrapped)) {
+          const pKey = `${nodeId}\u001f__preview__`;
+          if (!order.includes(pKey)) order.unshift(pKey);
+        }
       }
       return order;
     }
@@ -966,7 +1203,7 @@ function buildCard(node) {
       const wrapped = app.graph.getNodeById(nodeId);
       if (!wrapped || !Array.isArray(wrapped.widgets)) continue;
       for (const w of wrapped.widgets) {
-        if (!w || w.type === "converted-widget") continue;
+        if (!isRenderableWidget(w)) continue;
         order.push(`${nodeId}\u001f${w.name}`);
       }
     }
@@ -974,6 +1211,16 @@ function buildCard(node) {
   }
 
   let draggedRow = null;
+  let dropTarget = null;   // the row the cursor is over
+  let dropPos = null;      // "before" | "after"
+  function setDropTarget(row, pos) {
+    if (dropTarget === row && dropPos === pos) return;
+    if (dropTarget) dropTarget.classList.remove("drop-before", "drop-after");
+    dropTarget = row;
+    dropPos = pos;
+    if (row) row.classList.add(pos === "before" ? "drop-before" : "drop-after");
+  }
+  function clearDropTarget() { setDropTarget(null, null); }
 
   function commitDomOrder() {
     const sections = node.properties.sections || [];
@@ -1030,28 +1277,71 @@ function buildCard(node) {
       const sec = document.createElement("div");
       sec.className = "gnode-section";
       sec.style.setProperty("--accent-color", s.color);
+      // hidden widgets in this section only
+      const sectionHidden = hidden.filter(h =>
+        (s.node_ids || []).some(id => id == h.node_id)
+      );
+      const hiddenBtn = sectionHidden.length > 0
+        ? `<div class="gnode-section-actions">
+             <button class="gnode-section-hidden-btn" type="button">+ ${sectionHidden.length} hidden</button>
+             <div class="gnode-section-popover" data-role="section-popover"></div>
+           </div>`
+        : "";
       sec.innerHTML = `
         <div class="gnode-section-head">
           <span class="gnode-section-label" style="color:${s.color}">
             <span class="gnode-section-dot" style="background:${s.color}; box-shadow:0 0 8px ${s.color}"></span>
             ${escapeHtml(s.title.toUpperCase())}
           </span>
+          ${hiddenBtn}
         </div>
       `;
 
-      // dropping onto empty section area or the header inserts at the top
+      // wire the per-section hidden-widgets popover
+      if (sectionHidden.length > 0) {
+        const btn = sec.querySelector(".gnode-section-hidden-btn");
+        const pop = sec.querySelector('[data-role="section-popover"]');
+        for (const h of sectionHidden) {
+          const wrapped = app.graph.getNodeById(Number(h.node_id));
+          const nodeLabel = wrapped?.title || wrapped?.type || "";
+          const isPreview = h.widget_name === "__preview__";
+          const displayName = isPreview ? "preview" : h.widget_name;
+          const item = document.createElement("div");
+          item.className = "item";
+          item.innerHTML = `
+            <span class="plus">+</span>
+            <div>
+              <span class="name">${escapeHtml(displayName)}</span>
+              <span class="src">${escapeHtml(nodeLabel)}</span>
+            </div>
+          `;
+          item.addEventListener("click", () => {
+            restoreWidget(h.node_id, h.widget_name);
+          });
+          pop.appendChild(item);
+        }
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          // close others
+          body.querySelectorAll(".gnode-section-popover.open")
+            .forEach(p => { if (p !== pop) p.classList.remove("open"); });
+          pop.classList.toggle("open");
+        });
+      }
+
+
+      // dropping onto empty section area (below the last row) targets the
+      // last visible row with "after" so the drop lands at the end of the section
       sec.addEventListener("dragover", e => {
         if (!draggedRow) return;
-        // let row-level handlers take precedence
-        if (e.target.closest(".gnode-row")) return;
+        if (e.target.closest(".gnode-row")) return; // row handler takes over
         e.preventDefault();
-        // find first row in this section that isn't the dragged row
-        const firstRow = [...sec.querySelectorAll(".gnode-row")]
-          .find(r => r !== draggedRow);
-        if (firstRow) {
-          sec.insertBefore(draggedRow, firstRow);
+        const visibleRows = [...sec.querySelectorAll(".gnode-row")]
+          .filter(r => r !== draggedRow);
+        if (visibleRows.length > 0) {
+          setDropTarget(visibleRows[visibleRows.length - 1], "after");
         } else {
-          sec.appendChild(draggedRow);
+          clearDropTarget();
         }
       });
       sec.addEventListener("drop", e => { e.preventDefault(); });
@@ -1071,7 +1361,7 @@ function buildCard(node) {
           if (!isPreviewNode(wrapped)) continue;
           if (hidden.some(h => h.node_id == nodeId && h.widget_name === "__preview__")) continue;
           row = document.createElement("div");
-          row.className = "gnode-row";
+          row.className = "gnode-row is-preview";
           const badge = shortSectionLabel(s.title) || "preview";
           row.innerHTML = `
             <div class="k">${escapeHtml(badge.toLowerCase())}</div>
@@ -1085,7 +1375,7 @@ function buildCard(node) {
         } else {
           if (!wrapped.widgets) continue;
           const w = wrapped.widgets.find(x => x.name === widgetName);
-          if (!w || w.type === "converted-widget") continue;
+          if (!isRenderableWidget(w)) continue;
           if (isWidgetHidden(wrapped, w, hidden)) continue;
           if (skippedInBody.has(`${wrapped.id}\u001f${w.name}`)) continue;
           row = renderWidgetRow(wrapped, w);
@@ -1093,18 +1383,15 @@ function buildCard(node) {
         }
 
         row.style.setProperty("--accent-color", s.color);
-        const sliderTrack = row.querySelector(".gnode-slider");
+        const sliderTrack = row.querySelector(".gnode-slider-box");
         if (sliderTrack) sliderTrack.style.setProperty("--accent-color", s.color);
         row.dataset.rowKey = key;
         row.dataset.sectionIdx = String(sIdx);
 
-        // controls: hide button + drag handle, prepended into the first grid column
-        const controls = document.createElement("div");
-        controls.className = "gnode-row-controls";
-
+        // controls placed directly in the row grid (no wrapper) — hide aligns
+        // with the label (row 1), drag with the value box (row 2)
         const hideBtn = document.createElement("button");
         hideBtn.className = "gnode-row-hide";
-        hideBtn.title = "Hide from card";
         hideBtn.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg>`;
         // stop mousedown from reaching the row so the row's draggable=true (set
         // by the drag-handle) doesn't swallow the click on tall preview rows
@@ -1116,28 +1403,36 @@ function buildCard(node) {
 
         const dragHandle = document.createElement("div");
         dragHandle.className = "gnode-row-drag";
-        dragHandle.title = "Drag to reorder";
-        dragHandle.innerHTML = `<svg viewBox="0 0 8 14" fill="currentColor">
+        dragHandle.innerHTML = `<svg viewBox="0 0 8 18" fill="currentColor">
           <circle cx="2" cy="2" r="1"/><circle cx="6" cy="2" r="1"/>
           <circle cx="2" cy="7" r="1"/><circle cx="6" cy="7" r="1"/>
           <circle cx="2" cy="12" r="1"/><circle cx="6" cy="12" r="1"/>
+          <circle cx="2" cy="17" r="1"/><circle cx="6" cy="17" r="1"/>
         </svg>`;
 
-        controls.appendChild(hideBtn);
-        controls.appendChild(dragHandle);
-        row.insertBefore(controls, row.firstChild);
+        row.appendChild(hideBtn);
+        row.appendChild(dragHandle);
 
-        // drag-to-reorder with LIVE dom shifting so the target row visibly makes room
+        // drag-to-reorder: nothing shifts during the drag. the dragged row
+        // dims in place; an inset accent line on the row under the cursor
+        // shows where the drop will land. actual reorder happens on drop.
         dragHandle.addEventListener("mousedown", () => { row.draggable = true; });
         row.addEventListener("dragstart", e => {
           draggedRow = row;
-          row.classList.add("dragging");
           e.dataTransfer.setData("text/plain", row.dataset.rowKey);
           e.dataTransfer.effectAllowed = "move";
+          requestAnimationFrame(() => row.classList.add("dragging"));
         });
         row.addEventListener("dragend", () => {
           row.classList.remove("dragging");
           row.draggable = false;
+          // perform the actual move based on the tracked drop target
+          if (dropTarget && dropTarget !== row) {
+            const parent = dropTarget.parentNode;
+            if (dropPos === "before") parent.insertBefore(row, dropTarget);
+            else parent.insertBefore(row, dropTarget.nextSibling);
+          }
+          clearDropTarget();
           draggedRow = null;
           commitDomOrder();
         });
@@ -1146,9 +1441,7 @@ function buildCard(node) {
           e.preventDefault();
           const rect = row.getBoundingClientRect();
           const above = (e.clientY - rect.top) < rect.height / 2;
-          const parent = row.parentNode;
-          if (above) parent.insertBefore(draggedRow, row);
-          else parent.insertBefore(draggedRow, row.nextSibling);
+          setDropTarget(row, above ? "before" : "after");
         });
         row.addEventListener("drop", e => { e.preventDefault(); });
 
@@ -1167,43 +1460,9 @@ function buildCard(node) {
     });
   }
 
-  function renderPopover() {
-    popoverBody.innerHTML = "";
-    const hidden = ensureHiddenArray();
-    if (hidden.length === 0) {
-      popoverBody.innerHTML = `<div class="gnode-popover-empty">Nothing hidden</div>`;
-      return;
-    }
-    const sections = node.properties.sections || [];
-    for (const h of hidden) {
-      const wrapped = app.graph.getNodeById(h.node_id);
-      const sec = sections.find(s => s.node_ids?.includes(h.node_id));
-      const srcTitle = sec?.title || wrapped?.title || wrapped?.type || "";
-      const item = document.createElement("div");
-      item.className = "gnode-hidden-item";
-      item.innerHTML = `
-        <div>
-          <span class="label">${escapeHtml(h.widget_name)}</span>
-          <span class="src">${escapeHtml(srcTitle)}</span>
-        </div>
-        <span class="restore">+ show</span>
-      `;
-      item.addEventListener("click", () => restoreWidget(h.node_id, h.widget_name));
-      popoverBody.appendChild(item);
-    }
-  }
-
-  settingsBtn.addEventListener("click", e => {
-    e.stopPropagation();
-    const open = popover.classList.toggle("open");
-    settingsBtn.classList.toggle("on", open);
-  });
-  document.addEventListener("click", e => {
-    if (!popover.contains(e.target) && !settingsBtn.contains(e.target)) {
-      popover.classList.remove("open");
-      settingsBtn.classList.remove("on");
-    }
-  });
+  // per-section hidden-widgets popovers are built inside renderBody now;
+  // this is a no-op kept so existing callers (hide/restore/rebuild) still work.
+  function renderPopover() {}
 
   // inputs column: auto-shown when wrapped set contains input nodes (LoadImage, etc.)
   const INPUT_TYPES = new Set([
@@ -1714,6 +1973,10 @@ function wrapSelection() {
     gnode.properties.saved_groups = grabbedGroups;
     gnode.properties.sections = sections;
     gnode.properties.gnode_name = "Untitled";
+    // pick a random accent color so each GNODE is visually distinguishable
+    gnode.properties.node_color = pickRandomNodeColor();
+    gnode.color = gnode.properties.node_color;
+    gnode.bgcolor = gnode.properties.node_color;
     // horizontal layout is the default when there are enough sections to arrange
     if (sections.length >= 2) gnode.properties.layout = "horizontal";
     app.graph.add(gnode);
@@ -1776,6 +2039,12 @@ app.registerExtension({
 
         queueMicrotask(() => {
           try {
+            // restore (or seed) the accent color so reloaded GNODEs keep theirs
+            if (!this.properties.node_color) {
+              this.properties.node_color = pickRandomNodeColor();
+            }
+            this.color = this.properties.node_color;
+            this.bgcolor = this.properties.node_color;
             const card = buildCard(this);
             // auto-size the node to fit the card content
             const head = card.querySelector(".gnode-head");
@@ -1785,13 +2054,19 @@ app.registerExtension({
               let bodyH;
               if (card.classList.contains("horizontal")) {
                 // horizontal: body is stretch-sized, so scrollHeight lies. sum
-                // each section's intrinsic children (padding + head + rows) and
-                // take the tallest section as the natural body height.
+                // each section's intrinsic children (padding + head + rows +
+                // margins between them) and take the tallest section as the
+                // natural body height.
                 let max = 0;
                 for (const sec of body.querySelectorAll(".gnode-section")) {
                   const cs = getComputedStyle(sec);
                   let h = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-                  for (const child of sec.children) h += child.offsetHeight;
+                  for (const child of sec.children) {
+                    const ccs = getComputedStyle(child);
+                    h += child.offsetHeight
+                       + (parseFloat(ccs.marginTop) || 0)
+                       + (parseFloat(ccs.marginBottom) || 0);
+                  }
                   if (h > max) max = h;
                 }
                 bodyH = max || body.scrollHeight;
@@ -1799,6 +2074,7 @@ app.registerExtension({
                 // vertical: body is align-self:flex-start -> scrollHeight = content
                 bodyH = body.scrollHeight;
               }
+              // section padding-bottom already handles bottom breathing room
               return Math.max(CARD_MIN_HEIGHT, (head?.offsetHeight || 0) + bodyH + 4);
             };
             this.addDOMWidget("gnode_card", "gnode_card", card, {
@@ -1818,18 +2094,30 @@ app.registerExtension({
             this._gnodeSnapToFit = () =>
               requestAnimationFrame(() => requestAnimationFrame(snapToFit));
 
-            // observe body only. body is align-self:flex-start so its size == content
-            // (not the flex-stretched card height), so this fires only when content actually
-            // changes (row added, textarea grew/shrunk) — not on user corner-drag.
-            // snap-to-fit in both directions so shrinking the textarea also collapses the node.
-            const snapOnContentChange = () => {
+            // observe body. behavior depends on layout:
+            //   vertical: body is align-self:flex-start so its size == content;
+            //     the observer only fires on real content change -> snap in both
+            //     directions so shrinking a textarea also collapses the node.
+            //   horizontal: body is align-self:stretch so it grows/shrinks with
+            //     the card. that means observer also fires when the USER drags
+            //     the corner -> grow-only so we don't fight the drag.
+            const onBodyResize = () => {
               const target = measureNatural();
-              if (Math.abs((this.size?.[1] || 0) - target) > 1) {
-                this.size[1] = target;
-                this.setDirtyCanvas?.(true, true);
+              const current = this.size?.[1] || 0;
+              const horizontal = card.classList.contains("horizontal");
+              if (horizontal) {
+                if (current < target) {
+                  this.size[1] = target;
+                  this.setDirtyCanvas?.(true, true);
+                }
+              } else {
+                if (Math.abs(current - target) > 1) {
+                  this.size[1] = target;
+                  this.setDirtyCanvas?.(true, true);
+                }
               }
             };
-            const ro = new ResizeObserver(snapOnContentChange);
+            const ro = new ResizeObserver(onBodyResize);
             if (body) ro.observe(body);
             this._gnodeResizeObserver = ro;
 
