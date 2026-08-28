@@ -1227,19 +1227,24 @@ function renderWidgetRow(node, widget) {
 
     v.appendChild(wrap);
   } else if (type === "number" || type === "slider") {
-    const min = widget.options?.min ?? 0;
+    let min = widget.options?.min ?? 0;
     let max = widget.options?.max ?? 100;
     let step = widget.options?.step ?? 1;
-    // some widgets ship absurd max caps (KSampler steps=10000, cfg=100).
-    // pin common ones to sensible ceilings so the drag range feels real.
-    // user can still type a higher value via dbl-click if they really want.
-    const MAX_OVERRIDES = { steps: 50, cfg: 20 };
+    // some widgets ship absurd default ranges (KSampler steps=10000,
+    // cfg=100, LoRA strength=-100..100). pin common ones to sensible
+    // caps so the drag range feels real. user can still type a higher
+    // value via dbl-click if they really want.
+    const MAX_OVERRIDES = { steps: 50, cfg: 20, strength_model: 1, strength_clip: 1 };
+    const MIN_OVERRIDES = { strength_model: 0, strength_clip: 0 };
     if (MAX_OVERRIDES[widget.name] !== undefined) {
       max = Math.min(max, MAX_OVERRIDES[widget.name]);
     }
+    if (MIN_OVERRIDES[widget.name] !== undefined) {
+      min = Math.max(min, MIN_OVERRIDES[widget.name]);
+    }
     // some widgets have oversized step (e.g. steps=10 -> jumps by 10s). pin
     // to a sensible tick so the scrub feels granular.
-    const STEP_OVERRIDES = { steps: 1, cfg: 0.1, denoise: 0.01 };
+    const STEP_OVERRIDES = { steps: 1, cfg: 0.1, denoise: 0.01, strength_model: 0.05, strength_clip: 0.05 };
     if (STEP_OVERRIDES[widget.name] !== undefined) {
       step = STEP_OVERRIDES[widget.name];
     }
