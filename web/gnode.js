@@ -11,13 +11,25 @@ const SEPARATOR_W = 8;
 const DEFAULT_SIZE = [BODY_W, 320];
 const CARD_MIN_HEIGHT = 220;
 const SECTION_COLORS = ["#6ee7c7", "#f0a668", "#a08cff", "#7ec4ff", "#ffb86c"];
-// pool of pleasant LiteGraph node colors — one is picked at wrap for each GNODE
-const NODE_COLORS = [
-  "#7c5cff", "#4a9eff", "#22d3ee", "#2dd4bf", "#6ee7b7",
-  "#fbbf24", "#fb923c", "#f87171", "#f472b6", "#a855f7",
-];
+// use LiteGraph / ComfyUI's built-in node color palette so a wrapped GNODE
+// looks native (same colors the "Colors" submenu on any node offers).
+// each entry is { color, bgcolor } matching LGraphCanvas.node_colors.
+const FALLBACK_NODE_COLORS = {
+  red:       { color: "#322",    bgcolor: "#533"    },
+  brown:     { color: "#332922", bgcolor: "#593930" },
+  green:     { color: "#232",    bgcolor: "#353"    },
+  blue:      { color: "#223",    bgcolor: "#335"    },
+  pale_blue: { color: "#2a363b", bgcolor: "#3f5159" },
+  cyan:      { color: "#233",    bgcolor: "#355"    },
+  purple:    { color: "#323",    bgcolor: "#535"    },
+  yellow:    { color: "#432",    bgcolor: "#653"    },
+};
 function pickRandomNodeColor() {
-  return NODE_COLORS[Math.floor(Math.random() * NODE_COLORS.length)];
+  const palette = (typeof LGraphCanvas !== "undefined" && LGraphCanvas.node_colors)
+    || FALLBACK_NODE_COLORS;
+  const keys = Object.keys(palette).filter(k => k !== "black");
+  const entry = palette[keys[Math.floor(Math.random() * keys.length)]];
+  return { color: entry.color, bgcolor: entry.bgcolor };
 }
 
 /* ---------- styles ---------- */
@@ -946,8 +958,21 @@ function renderWidgetRow(node, widget) {
     v.appendChild(sel);
   } else if (type === "number" || type === "slider") {
     const min = widget.options?.min ?? 0;
-    const max = widget.options?.max ?? 100;
-    const step = widget.options?.step ?? 1;
+    let max = widget.options?.max ?? 100;
+    let step = widget.options?.step ?? 1;
+    // some widgets ship absurd max caps (KSampler steps=10000, cfg=100).
+    // pin common ones to sensible ceilings so the drag range feels real.
+    // user can still type a higher value via dbl-click if they really want.
+    const MAX_OVERRIDES = { steps: 50, cfg: 20 };
+    if (MAX_OVERRIDES[widget.name] !== undefined) {
+      max = Math.min(max, MAX_OVERRIDES[widget.name]);
+    }
+    // some widgets have oversized step (e.g. steps=10 -> jumps by 10s). pin
+    // to a sensible tick so the scrub feels granular.
+    const STEP_OVERRIDES = { steps: 1, cfg: 0.1, denoise: 0.01 };
+    if (STEP_OVERRIDES[widget.name] !== undefined) {
+      step = STEP_OVERRIDES[widget.name];
+    }
     const bounded = isFinite(min) && isFinite(max) && (max - min) < 1e9;
     if (bounded) {
       const box = document.createElement("div");
@@ -981,11 +1006,12 @@ function renderWidgetRow(node, widget) {
         if (!dragging) return;
         const dx = e.clientX - startX;
         if (Math.abs(dx) > 2) moved = true;
-        // per-pixel scrub value: scales gently with the range so a 0..1 slider
-        // and a 0..10000 slider both feel usable. floor at `step` so we never
-        // move less than one tick. shift = fine (0.1x), ctrl = coarse (10x).
+        // soft scrub: full range covers ~400 pixels regardless of scale so
+        // small widgets (denoise 0..1) and big ones (steps 0..50) all feel
+        // predictable. snap resolves to the widget's step. shift = 0.1x fine,
+        // ctrl = 10x coarse.
         const speed = e.shiftKey ? 0.1 : (e.ctrlKey ? 10 : 1);
-        const perPixel = Math.max(step, (max - min) / 500);
+        const perPixel = (max - min) / 400;
         const delta = dx * perPixel * speed;
         const next = snap(clamp(startVal + delta));
         if (next !== current) { current = next; paint(); commit(current); }
@@ -1974,9 +2000,10 @@ function wrapSelection() {
     gnode.properties.sections = sections;
     gnode.properties.gnode_name = "Untitled";
     // pick a random accent color so each GNODE is visually distinguishable
-    gnode.properties.node_color = pickRandomNodeColor();
-    gnode.color = gnode.properties.node_color;
-    gnode.bgcolor = gnode.properties.node_color;
+    const c = pickRandomNodeColor();
+    gnode.properties.node_color = c;
+    gnode.color = c.color;
+    gnode.bgcolor = c.bgcolor;
     // horizontal layout is the default when there are enough sections to arrange
     if (sections.length >= 2) gnode.properties.layout = "horizontal";
     app.graph.add(gnode);
@@ -2040,11 +2067,11 @@ app.registerExtension({
         queueMicrotask(() => {
           try {
             // restore (or seed) the accent color so reloaded GNODEs keep theirs
-            if (!this.properties.node_color) {
+            if (!this.properties.node_color || typeof this.properties.node_color === "string") {
               this.properties.node_color = pickRandomNodeColor();
             }
-            this.color = this.properties.node_color;
-            this.bgcolor = this.properties.node_color;
+            this.color = this.properties.node_color.color;
+            this.bgcolor = this.properties.node_color.bgcolor;
             const card = buildCard(this);
             // auto-size the node to fit the card content
             const head = card.querySelector(".gnode-head");
