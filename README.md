@@ -4,7 +4,7 @@ A frontend-only ComfyUI extension that collapses a cluster of nodes into a singl
 
 Select any set of nodes, right-click → **⧉ CREATE GNODE**, and get one grouped card exposing just the parameters and previews you care about. Restore the original layout any time with **EXPAND**.
 
-![GNODE card with two sections](docs/card-horizontal.png)
+![GNODE card with two sections](docs/01.png)
 
 ## Install
 
@@ -27,7 +27,7 @@ Restart ComfyUI. No dependencies, frontend-only.
 
 Select any nodes and right-click → **⧉ CREATE GNODE**:
 
-![CREATE GNODE in the context menu](docs/context-menu.png)
+![CREATE GNODE in the context menu](docs/02.png)
 
 - **Create**: select 2+ nodes → right-click → `⧉ CREATE GNODE`. LiteGraph groups become section headers automatically; ungrouped nodes fall into a Misc section.
 - **Expand**: click **EXPAND** on the card to restore original positions and groups.
