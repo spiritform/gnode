@@ -1,6 +1,6 @@
 [project]
 name = "gnode"
-version = "0.1.6"
+version = "0.1.7"
 description = "Group nodes into a clean card UI — a facade over your existing graph."
 license = { text = "MIT" }
 requires-python = ">=3.9"

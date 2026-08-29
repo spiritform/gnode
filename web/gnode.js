@@ -179,9 +179,7 @@ const CSS = `
   align-items: stretch;
   flex: 1;
   min-height: 0;
-  /* scroll vertically when the user shrinks the node below content height */
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 /* body: fills when no side cols; fixed to --body-w when either side col opens */
 .gnode-body {
@@ -189,6 +187,10 @@ const CSS = `
   min-width: 0;
   padding: 4px 0;
   overflow-x: hidden;
+  /* scroll only the middle body when it exceeds the card height. side
+     cols stay put. max-height: 100% of card-content caps growth. */
+  overflow-y: auto;
+  max-height: 100%;
   /* size to intrinsic content height, don't stretch to card height —
      otherwise scrollHeight reports the flex-stretched size and the
      grow-observer feedback-loops the node taller each frame */
@@ -350,9 +352,9 @@ const CSS = `
   font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  /* keep thumb reasonable when the preview col is dragged very wide —
-     otherwise aspect-ratio:1 makes it taller than the card and it clips */
-  max-width: 260px;
+  /* no width cap — thumb grows with its column so the preview scales
+     when the user drags the right separator wider */
+  max-width: none;
 }
 .gnode-thumb img {
   width: 100%; height: 100%; object-fit: contain;
