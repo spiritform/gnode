@@ -211,7 +211,8 @@ const CSS = `
   transition: flex-basis 0.28s cubic-bezier(.4,.2,.2,1);
 }
 .gnode-card.with-previews .gnode-previews-col {
-  flex: 1 1 var(--pw, 200px);
+  /* higher grow than body so a wider node primarily grows the preview col */
+  flex: 3 1 var(--pw, 200px);
   min-width: 140px;
   border-left: 1px solid var(--line);
   background: rgba(255,255,255,0.008);
