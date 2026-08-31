@@ -554,6 +554,21 @@ const CSS = `
   letter-spacing: 0.22em;
   font-weight: 700;
   color: var(--muted);
+  text-transform: uppercase;
+}
+/* editable headers: subtle hover hint + focus ring while renaming */
+.gnode-editable-head {
+  cursor: text;
+  padding: 1px 4px;
+  margin-left: -4px;
+  border-radius: 3px;
+  outline: none;
+  transition: background 0.12s;
+}
+.gnode-editable-head:hover { background: rgba(255,255,255,0.05); }
+.gnode-editable-head:focus {
+  background: rgba(160,140,255,0.08);
+  box-shadow: inset 0 0 0 1px rgba(160,140,255,0.35);
 }
 /* executing pulse on the label itself (dot is gone) — soft glow via
    text-shadow so it doesn't shift layout while pulsing */
@@ -1429,6 +1444,43 @@ function buildCard(node) {
     return node.properties.hidden_widgets;
   }
 
+  // makes a header element rename-on-double-click. contentEditable is off
+  // until dblclick so single-clicks don't focus a caret and the header still
+  // reads as a static label. onSave receives the trimmed new text (may be
+  // empty — caller decides whether to keep the original).
+  function makeHeaderEditable(el, getInitial, onSave) {
+    el.classList.add("gnode-editable-head");
+    el.spellcheck = false;
+    el.title = "Double-click to rename";
+    el.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      el.contentEditable = "true";
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); el.blur(); }
+      else if (e.key === "Escape") {
+        e.preventDefault();
+        el.textContent = getInitial();
+        el.blur();
+      }
+    });
+    el.addEventListener("blur", () => {
+      el.contentEditable = "false";
+      onSave(el.textContent.trim());
+    });
+    // while editing, keep mousedown from starting card drag / node drag
+    el.addEventListener("mousedown", (e) => {
+      if (el.isContentEditable) e.stopPropagation();
+    });
+  }
+
   function hideWidget(nodeId, widgetName) {
     const arr = ensureHiddenArray();
     if (!arr.some(h => h.node_id == nodeId && h.widget_name === widgetName)) {
@@ -1568,6 +1620,9 @@ function buildCard(node) {
   }
 
   function renderBody() {
+    // preserve an in-progress rename — see same guard in renderPreviews()
+    if (body.contains(document.activeElement) &&
+        document.activeElement.isContentEditable) return;
     body.innerHTML = "";
     const sections = node.properties.sections || [];
     const hidden = ensureHiddenArray();
@@ -1598,15 +1653,22 @@ function buildCard(node) {
         : "";
       sec.innerHTML = `
         <div class="gnode-section-head">
-          <span class="gnode-section-label" style="color:${s.color}">
-            ${escapeHtml(s.title.toUpperCase())}
-          </span>
+          <span class="gnode-section-label" style="color:${s.color}">${escapeHtml(s.title)}</span>
           <div class="gnode-section-actions">
             ${moveButtons}
             ${hiddenChip}
           </div>
         </div>
       `;
+
+      // rename-on-double-click for the section header
+      const labelEl = sec.querySelector(".gnode-section-label");
+      makeHeaderEditable(labelEl, () => s.title, (text) => {
+        const next = text || s.title;
+        if (next === s.title) { labelEl.textContent = s.title; return; }
+        s.title = next;
+        renderBody();
+      });
 
       // wire the move chevrons
       sec.querySelectorAll(".gnode-section-move").forEach(btn => {
@@ -1840,6 +1902,9 @@ function buildCard(node) {
 
   function renderInputs() {
     if (!inputsInner) return;
+    // preserve an in-progress rename — see same guard in renderPreviews()
+    if (inputsInner.contains(document.activeElement) &&
+        document.activeElement.isContentEditable) return;
     const inputs = collectInputNodes();
     skippedInBody.clear();
     const wasOpen = el.classList.contains("with-inputs");
@@ -1852,12 +1917,14 @@ function buildCard(node) {
     el.classList.add("with-inputs");
     if (!wasOpen) syncNodeWidth();
     inputsInner.innerHTML = "";
+    const inputTitles = node.properties.input_titles || {};
     for (const w_node of inputs) {
       const card = document.createElement("div");
       card.className = "gnode-input-card";
-      const header = (w_node.title || w_node.type || "input")
+      const defaultHeader = (w_node.title || w_node.type || "input")
         .replace(/([a-z])([A-Z])/g, "$1 $2")   // "LoadImage" -> "Load Image"
         .toUpperCase();
+      const header = inputTitles[w_node.id] || defaultHeader;
       // file combo (usually named "image"/"video"/"file")
       const fileWidget = w_node.widgets?.find(x =>
         x && x.type === "combo" &&
@@ -1884,6 +1951,20 @@ function buildCard(node) {
           ${imgSrc ? `<img src="${escapeHtml(imgSrc)}"/>` : `<span class="empty">double-click or drop</span>`}
         </div>
       `;
+
+      // rename-on-double-click for the input card header. clearing to empty
+      // (or back to the default) drops the override so the wrapped node's
+      // native title takes over again.
+      const headEl = card.querySelector(".gnode-input-card-head");
+      makeHeaderEditable(headEl, () => header, (text) => {
+        node.properties.input_titles = node.properties.input_titles || {};
+        if (!text || text.toUpperCase() === defaultHeader.toUpperCase()) {
+          delete node.properties.input_titles[w_node.id];
+        } else {
+          node.properties.input_titles[w_node.id] = text;
+        }
+        renderInputs();
+      });
 
       // adopt the image's aspect ratio once it loads (so a landscape image
       // gives a shorter thumb, not a big letterboxed square)
@@ -2033,6 +2114,19 @@ function buildCard(node) {
     return out;
   }
 
+  function wirePreviewHeadEdit() {
+    const headEl = previewsInner?.querySelector(".gnode-input-card-head");
+    if (!headEl) return;
+    makeHeaderEditable(headEl, () => node.properties.preview_title || "PREVIEW", (text) => {
+      if (!text || text.toUpperCase() === "PREVIEW") {
+        delete node.properties.preview_title;
+      } else {
+        node.properties.preview_title = text;
+      }
+      renderPreviews();
+    });
+  }
+
   function renderPreviews() {
     const slots = collectPreviewSlots();
 
@@ -2063,20 +2157,27 @@ function buildCard(node) {
     }
 
     if (!previewsInner) return;
+    // don't blow away the DOM while the user is actively renaming the head —
+    // the 600ms polling interval would otherwise trash their edit mid-type
+    if (previewsInner.contains(document.activeElement) &&
+        document.activeElement.isContentEditable) return;
+    const previewTitle = node.properties.preview_title || "PREVIEW";
     // use the same .gnode-input-card structure as the LOAD IMAGE side so
     // label→thumb spacing matches exactly (head padding + card gap identical)
     if (slots.length === 0) {
       previewsInner.innerHTML = `
         <div class="gnode-input-card">
-          <div class="gnode-input-card-head">PREVIEW</div>
+          <div class="gnode-input-card-head">${escapeHtml(previewTitle)}</div>
           <div class="gnode-empty" style="padding:16px 0">no preview nodes wrapped</div>
         </div>`;
+      wirePreviewHeadEdit();
       return;
     }
     previewsInner.innerHTML = `
       <div class="gnode-input-card">
-        <div class="gnode-input-card-head">PREVIEW</div>
+        <div class="gnode-input-card-head">${escapeHtml(previewTitle)}</div>
       </div>`;
+    wirePreviewHeadEdit();
     const card = previewsInner.querySelector(".gnode-input-card");
     for (const p of slots) {
       const thumb = document.createElement("div");
