@@ -1105,7 +1105,19 @@ function renderWidgetRow(node, widget) {
   };
 
   if (type === "combo") {
-    const values = (widget.options?.values || []).map(String);
+    // resolve values fresh each time — some ComfyUI combos (esp. model lists)
+    // supply `values` as a function that returns the current list, or as a
+    // promise/array that fills in after node registration. static-only reads
+    // miss subfolder entries loaded lazily.
+    const getValues = () => {
+      let raw = widget.options?.values;
+      if (typeof raw === "function") {
+        try { raw = raw.call(widget.options, widget, node); }
+        catch { try { raw = raw(); } catch { raw = []; } }
+      }
+      return (Array.isArray(raw) ? raw : []).map(String);
+    };
+    let values = getValues();
     const wrap = document.createElement("div");
     wrap.className = "gnode-combo";
     const btn = document.createElement("button");
@@ -1188,7 +1200,10 @@ function renderWidgetRow(node, widget) {
 
     const open = () => {
       if (popover) return;
-      // seed active to the current value if visible
+      // re-resolve values on every open — model lists load lazily, so a value
+      // that wasn't there when the widget was created (e.g. subfolder entries
+      // populated after the folder scan) shows up on subsequent opens.
+      values = getValues();
       filtered = values.slice();
       activeIdx = Math.max(0, values.indexOf(String(widget.value ?? "")));
 
@@ -1899,6 +1914,10 @@ function buildCard(node) {
   // expose so onResize can snap corner-drag back to the required width and
   // the card stays contained inside the LiteGraph node body.
   node._gnodeRequiredWidth = computeRequiredWidth;
+  // expose so the initial mount can force-shrink a stale saved width down to
+  // whatever the card actually needs. subsequent snap-to-fit calls only touch
+  // height so a user drag-wider isn't undone by hide/restore/reorder.
+  node._gnodeSyncWidth = syncNodeWidth;
 
   function renderInputs() {
     if (!inputsInner) return;
@@ -2580,7 +2599,15 @@ app.registerExtension({
               this.size[1] = target;
               this.setDirtyCanvas?.(true, true);
             };
-            requestAnimationFrame(() => requestAnimationFrame(snapToFit));
+            // on first mount, also force width down to what the card needs —
+            // otherwise a workflow saved wide leaves a colored margin around
+            // the card until the user drags a corner. re-mounts (refresh) hit
+            // the same path so this covers "fixes on refresh" too.
+            const initialFit = () => {
+              this._gnodeSyncWidth?.(true);
+              snapToFit();
+            };
+            requestAnimationFrame(() => requestAnimationFrame(initialFit));
             // expose so content-mutating actions (hide row, restore row, reorder, layout flip)
             // can request an exact re-fit after their render settles
             this._gnodeSnapToFit = () =>
