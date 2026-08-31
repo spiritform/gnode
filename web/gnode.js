@@ -342,7 +342,7 @@ const CSS = `
 }
 .gnode-thumb {
   position: relative;
-  aspect-ratio: 1;
+  aspect-ratio: 16 / 9;
   background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 6px;
