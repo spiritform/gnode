@@ -1281,8 +1281,11 @@ function renderWidgetRow(node, widget) {
     if (STEP_OVERRIDES[widget.name] !== undefined) {
       step = STEP_OVERRIDES[widget.name];
     }
+    // bounded widgets (steps, cfg, denoise…) get a fill bar visualizing where
+    // the value sits in [min, max]. unbounded ones (seed) skip the fill and
+    // scrub at 1 step per pixel — enough for +1 tweaks, ctrl for coarser.
     const bounded = isFinite(min) && isFinite(max) && (max - min) < 1e9;
-    if (bounded) {
+    {
       const box = document.createElement("div");
       box.className = "gnode-slider-box";
       box.tabIndex = 0;
@@ -1292,11 +1295,17 @@ function renderWidgetRow(node, widget) {
       let current = Number(widget.value);
       const decimals = step < 1 ? Math.min(4, String(step).split(".")[1]?.length || 2) : 0;
       const format = n => decimals > 0 ? Number(n).toFixed(decimals) : String(Math.round(n));
-      const clamp = n => Math.max(min, Math.min(max, n));
+      const clamp = bounded
+        ? n => Math.max(min, Math.min(max, n))
+        : n => Math.max(-Number.MAX_SAFE_INTEGER, Math.min(Number.MAX_SAFE_INTEGER, n));
       const snap = n => (step > 0 ? Math.round(n / step) * step : n);
       const paint = () => {
-        const pct = ((current - min) / (max - min)) * 100;
-        box.style.setProperty("--pct", pct + "%");
+        if (bounded) {
+          const pct = ((current - min) / (max - min)) * 100;
+          box.style.setProperty("--pct", pct + "%");
+        } else {
+          box.style.setProperty("--pct", "0%");
+        }
         label.textContent = format(current);
       };
       paint();
@@ -1314,12 +1323,12 @@ function renderWidgetRow(node, widget) {
         if (!dragging) return;
         const dx = e.clientX - startX;
         if (Math.abs(dx) > 2) moved = true;
-        // soft scrub: full range covers ~400 pixels regardless of scale so
-        // small widgets (denoise 0..1) and big ones (steps 0..50) all feel
-        // predictable. snap resolves to the widget's step. shift = 0.1x fine,
-        // ctrl = 10x coarse.
+        // bounded: full range covers ~400 pixels so small (denoise 0..1) and
+        // big (steps 0..50) ranges all feel predictable. unbounded: 1 step
+        // per pixel — fine control for seed nudging, ctrl multiplies.
+        // shift = 0.1x fine, ctrl = 10x coarse.
         const speed = e.shiftKey ? 0.1 : (e.ctrlKey ? 10 : 1);
-        const perPixel = (max - min) / 400;
+        const perPixel = bounded ? (max - min) / 400 : (step || 1);
         const delta = dx * perPixel * speed;
         const next = snap(clamp(startVal + delta));
         if (next !== current) { current = next; paint(); commit(current); }
@@ -1357,13 +1366,6 @@ function renderWidgetRow(node, widget) {
         });
       });
       v.appendChild(box);
-    } else {
-      const inp = document.createElement("input");
-      inp.type = "text";
-      inp.className = "gnode-input";
-      inp.value = widget.value ?? "";
-      inp.addEventListener("change", () => commit(parseFloat(inp.value)));
-      v.appendChild(inp);
     }
   } else if (type === "toggle" || type === "boolean") {
     const label = document.createElement("label");
