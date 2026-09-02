@@ -1609,7 +1609,14 @@ function buildCard(node) {
       }
       // migrate: re-append any renderable widget/preview keys that exist on
       // wrapped nodes but aren't in the saved order (e.g. hidden rows get
-      // dropped by commitDomOrder during a drag and would otherwise be orphaned).
+      // dropped by commitDomOrder during a drag and would otherwise be
+      // orphaned). skip keys that another section already owns — otherwise
+      // dragging a widget across columns duplicates it back into its origin.
+      const allSections = node.properties.sections || [];
+      const ownedByOther = (key) => allSections.some(other =>
+        other !== section && Array.isArray(other.widget_order) &&
+        other.widget_order.includes(key)
+      );
       for (const nodeId of section.node_ids || []) {
         const wrapped = app.graph.getNodeById(nodeId);
         if (!wrapped) continue;
@@ -1617,12 +1624,16 @@ function buildCard(node) {
           for (const w of wrapped.widgets) {
             if (!isRenderableWidget(w)) continue;
             const key = `${nodeId}\u001f${w.name}`;
-            if (!order.includes(key)) order.push(key);
+            if (order.includes(key)) continue;
+            if (ownedByOther(key)) continue;
+            order.push(key);
           }
         }
         if (isPreviewNode(wrapped)) {
           const pKey = `${nodeId}\u001f__preview__`;
-          if (!order.includes(pKey)) order.unshift(pKey);
+          if (order.includes(pKey)) continue;
+          if (ownedByOther(pKey)) continue;
+          order.unshift(pKey);
         }
       }
       return order;
@@ -1792,8 +1803,8 @@ function buildCard(node) {
         <div class="gnode-section-head">
           <span class="gnode-section-label" style="color:${s.color}">${escapeHtml(s.title)}</span>
           <div class="gnode-section-actions">
-            ${addChip}
             ${hiddenChip}
+            ${addChip}
             ${moveButtons}
           </div>
         </div>
