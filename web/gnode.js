@@ -657,9 +657,9 @@ const CSS = `
 }
 .gnode-row.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
 .gnode-row.drop-after  { box-shadow: inset 0 -3px 0 0 var(--accent); }
-/* subheader + divider rows lay controls inline at the right (not in the left
-   gutter like widget rows) — they're short so overlapping absolute controls
-   would collide with each other and, for dividers, blur into the line */
+/* subheader + divider rows: inline flex with controls prepended on the LEFT
+   ([::][×] label / line). controls stay side-by-side so they don't overlap
+   each other; the line naturally sits beside them instead of behind them. */
 .gnode-row.is-subheader,
 .gnode-row.is-divider {
   display: flex;
