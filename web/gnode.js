@@ -430,23 +430,23 @@ const CSS = `
   pointer-events: none;
 }
 
-/* horizontal layout: sections sit side-by-side */
-.gnode-card.horizontal .gnode-body {
+/* sections sit side-by-side as columns. body stretches to full card height so
+   section border-rights reach the bottom; measureNatural computes section-
+   intrinsic height instead of body.scrollHeight (which would report the
+   stretched height and loop). */
+.gnode-card .gnode-body {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* in horizontal, let body stretch to full card height so section border-rights
-     reach the bottom. measureNatural computes section-intrinsic height instead
-     of body.scrollHeight (which would report the stretched height and loop). */
   align-self: stretch;
 }
-.gnode-card.horizontal .gnode-section {
+.gnode-card .gnode-section {
   flex: 1 1 0;
   min-width: 0;
   border-bottom: none;
   border-right: 1px solid var(--line);
 }
-.gnode-card.horizontal .gnode-section:last-child { border-right: none; }
+.gnode-card .gnode-section:last-child { border-right: none; }
 .gnode-section-head {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 10px;
@@ -629,6 +629,12 @@ const CSS = `
 }
 .gnode-row.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
 .gnode-row.drop-after  { box-shadow: inset 0 -3px 0 0 var(--accent); }
+/* whole-section highlight when dragging a row into an empty column */
+.gnode-section.drop-section {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: rgba(160,140,255,0.06);
+  border-radius: 6px;
+}
 .gnode-row .k {
   font-size: 9px;
   color: var(--muted);
@@ -1417,10 +1423,9 @@ function buildCard(node) {
       <span class="gnode-brand">GNODE</span>
       <span class="gnode-name" contenteditable="true" spellcheck="false">${escapeHtml(gnodeName)}</span>
       <span class="gnode-spacer"></span>
-      <button class="gnode-icon-btn" data-act="layout" title="Switch layout (vertical / horizontal)">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
-          <rect x="2" y="3" width="5" height="10" rx="1"/>
-          <rect x="9" y="3" width="5" height="10" rx="1"/>
+      <button class="gnode-icon-btn" data-act="add-section" title="Add empty column">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <path d="M8 3 L8 13 M3 8 L13 8"/>
         </svg>
       </button>
       <button class="gnode-icon-btn" data-act="preview" title="Show previews">
@@ -1586,6 +1591,7 @@ function buildCard(node) {
   let draggedRow = null;
   let dropTarget = null;   // the row the cursor is over
   let dropPos = null;      // "before" | "after"
+  let dropSection = null;  // section el when cursor is over an empty section
   function setDropTarget(row, pos) {
     if (dropTarget === row && dropPos === pos) return;
     if (dropTarget) dropTarget.classList.remove("drop-before", "drop-after");
@@ -1593,7 +1599,16 @@ function buildCard(node) {
     dropPos = pos;
     if (row) row.classList.add(pos === "before" ? "drop-before" : "drop-after");
   }
-  function clearDropTarget() { setDropTarget(null, null); }
+  function setDropSection(sec) {
+    if (dropSection === sec) return;
+    if (dropSection) dropSection.classList.remove("drop-section");
+    dropSection = sec;
+    if (sec) sec.classList.add("drop-section");
+  }
+  function clearDropTarget() {
+    setDropTarget(null, null);
+    setDropSection(null);
+  }
 
   function commitDomOrder() {
     const sections = node.properties.sections || [];
@@ -1735,7 +1750,9 @@ function buildCard(node) {
 
 
       // dropping onto empty section area (below the last row) targets the
-      // last visible row with "after" so the drop lands at the end of the section
+      // last visible row with "after" so the drop lands at the end of the
+      // section. if the section has no rows at all (fresh empty column), the
+      // whole section becomes the drop zone so cross-section drags land there.
       sec.addEventListener("dragover", e => {
         if (!draggedRow) return;
         if (e.target.closest(".gnode-row")) return; // row handler takes over
@@ -1745,7 +1762,8 @@ function buildCard(node) {
         if (visibleRows.length > 0) {
           setDropTarget(visibleRows[visibleRows.length - 1], "after");
         } else {
-          clearDropTarget();
+          setDropTarget(null, null);
+          setDropSection(sec);
         }
       });
       sec.addEventListener("drop", e => { e.preventDefault(); });
@@ -1842,10 +1860,17 @@ function buildCard(node) {
             const parent = dropTarget.parentNode;
             if (dropPos === "before") parent.insertBefore(row, dropTarget);
             else parent.insertBefore(row, dropTarget.nextSibling);
+          } else if (dropSection) {
+            // dropped into an empty section — append (the "no exposed widgets"
+            // placeholder gets cleared on next renderBody after commitDomOrder)
+            dropSection.appendChild(row);
           }
           clearDropTarget();
           draggedRow = null;
           commitDomOrder();
+          // renderBody rebuilds section markup so an "empty" section that just
+          // received its first row loses its placeholder cleanly
+          renderBody();
         });
         row.addEventListener("dragover", e => {
           if (!draggedRow || draggedRow === row) { e.preventDefault(); return; }
@@ -2261,31 +2286,31 @@ function buildCard(node) {
     prevRemove?.call(this);
   };
 
-  // layout toggle (vertical <-> horizontal) — only meaningful with 2+ sections
-  const layoutBtn = el.querySelector('[data-act="layout"]');
-  const sectionCount = (node.properties.sections || []).length;
-  if (sectionCount < 2) {
-    layoutBtn.style.display = "none";
-    // force vertical if only one section
-    if (node.properties.layout === "horizontal") node.properties.layout = "vertical";
-  }
-  function applyLayout(mode) {
-    const horizontal = mode === "horizontal" && sectionCount >= 2;
-    el.classList.toggle("horizontal", horizontal);
-    layoutBtn.classList.toggle("on", horizontal);
-    layoutBtn.title = horizontal ? "Switch to vertical layout" : "Switch to horizontal layout";
-    // widen body itself for horizontal so each section has room; leave the side
-    // columns (inputs / previews) at their own widths — computeRequiredWidth sums them.
-    const bodyW = horizontal ? Math.max(BODY_W, sectionCount * 380) : BODY_W;
+  // sections always render horizontally as columns. widen the body so each
+  // section has ~380px to breathe — side columns (inputs / previews) sit at
+  // their own widths and computeRequiredWidth sums everything.
+  function currentSectionCount() { return (node.properties.sections || []).length; }
+  function applyLayout() {
+    const bodyW = Math.max(BODY_W, currentSectionCount() * 380);
     el.style.setProperty("--body-w", `${bodyW}px`);
     syncNodeWidth(true);
   }
-  // restore saved layout on init
-  if (node.properties.layout === "horizontal") applyLayout("horizontal");
-  layoutBtn.addEventListener("click", () => {
-    const next = node.properties.layout === "horizontal" ? "vertical" : "horizontal";
-    node.properties.layout = next;
-    applyLayout(next);
+  applyLayout();
+
+  // add-column button: appends an empty section that widgets can be dragged into
+  const addSectionBtn = el.querySelector('[data-act="add-section"]');
+  addSectionBtn.addEventListener("click", () => {
+    const sections = node.properties.sections = node.properties.sections || [];
+    const color = SECTION_COLORS[sections.length % SECTION_COLORS.length];
+    sections.push({
+      title: "New",
+      color,
+      node_ids: [],
+      widget_order: [],
+    });
+    renderBody();
+    applyLayout();
+    node._gnodeSnapToFit?.();
   });
 
   previewBtn.addEventListener("click", () => {
@@ -2486,8 +2511,6 @@ function wrapSelection() {
     gnode.properties.node_color = c;
     gnode.color = c.color;
     gnode.bgcolor = c.bgcolor;
-    // horizontal layout is the default when there are enough sections to arrange
-    if (sections.length >= 2) gnode.properties.layout = "horizontal";
     app.graph.add(gnode);
 
     app.canvas.selectNodes([gnode]);
@@ -2560,29 +2583,23 @@ app.registerExtension({
             const body = card.querySelector(".gnode-body");
             const measureNatural = () => {
               if (!body) return CARD_MIN_HEIGHT;
-              let bodyH;
-              if (card.classList.contains("horizontal")) {
-                // horizontal: body is stretch-sized, so scrollHeight lies. sum
-                // each section's intrinsic children (padding + head + rows +
-                // margins between them) and take the tallest section as the
-                // natural body height.
-                let max = 0;
-                for (const sec of body.querySelectorAll(".gnode-section")) {
-                  const cs = getComputedStyle(sec);
-                  let h = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-                  for (const child of sec.children) {
-                    const ccs = getComputedStyle(child);
-                    h += child.offsetHeight
-                       + (parseFloat(ccs.marginTop) || 0)
-                       + (parseFloat(ccs.marginBottom) || 0);
-                  }
-                  if (h > max) max = h;
+              // body is stretch-sized in flex-row, so scrollHeight lies. sum
+              // each section's intrinsic children (padding + head + rows +
+              // margins between them) and take the tallest section as the
+              // natural body height.
+              let max = 0;
+              for (const sec of body.querySelectorAll(".gnode-section")) {
+                const cs = getComputedStyle(sec);
+                let h = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+                for (const child of sec.children) {
+                  const ccs = getComputedStyle(child);
+                  h += child.offsetHeight
+                     + (parseFloat(ccs.marginTop) || 0)
+                     + (parseFloat(ccs.marginBottom) || 0);
                 }
-                bodyH = max || body.scrollHeight;
-              } else {
-                // vertical: body is align-self:flex-start -> scrollHeight = content
-                bodyH = body.scrollHeight;
+                if (h > max) max = h;
               }
+              const bodyH = max || body.scrollHeight;
               // section padding-bottom already handles bottom breathing room
               return Math.max(CARD_MIN_HEIGHT, (head?.offsetHeight || 0) + bodyH + 4);
             };
