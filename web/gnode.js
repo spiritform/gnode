@@ -186,7 +186,9 @@ const CSS = `
   flex: 1 1 auto;
   min-width: 0;
   padding: 4px 0;
-  overflow-x: hidden;
+  /* horizontal scroll kicks in only if the user drags the card narrower than
+     the sum of section min-widths — otherwise sections just share the space */
+  overflow-x: auto;
   /* scroll only the middle body when it exceeds the card height. side
      cols stay put. max-height: 100% of card-content caps growth. */
   overflow-y: auto;
@@ -442,7 +444,9 @@ const CSS = `
 }
 .gnode-card .gnode-section {
   flex: 1 1 0;
-  min-width: 0;
+  /* absolute floor per section so widget content stays legible even when the
+     user drags the card narrower — body's overflow-x picks up any deficit */
+  min-width: 260px;
   border-bottom: none;
   border-right: 1px solid var(--line);
 }
@@ -2461,7 +2465,10 @@ function buildCard(node) {
   // their own widths and computeRequiredWidth sums everything.
   function currentSectionCount() { return (node.properties.sections || []).length; }
   function applyLayout() {
-    const bodyW = Math.max(BODY_W, currentSectionCount() * 380);
+    // per-section footprint matches the CSS min-width so the node's minimum
+    // stays consistent with what the sections can actually shrink to. user
+    // can drag wider than this; body's overflow-x handles anything narrower.
+    const bodyW = Math.max(BODY_W, currentSectionCount() * 260);
     el.style.setProperty("--body-w", `${bodyW}px`);
     syncNodeWidth(true);
   }
