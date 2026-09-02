@@ -375,7 +375,7 @@ const CSS = `
   z-index: 1;
 }
 .gnode-section {
-  padding: 14px 20px 30px;
+  padding: 12px 20px 30px;
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
@@ -448,11 +448,11 @@ const CSS = `
 }
 .gnode-card .gnode-section:last-child { border-right: none; }
 .gnode-section-head {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
   margin-bottom: 10px;
   position: relative;
   /* fixed height so sections with/without a hidden-chip line up */
-  min-height: 22px;
+  min-height: 18px;
 }
 .gnode-section-actions {
   margin-left: auto;
@@ -466,21 +466,45 @@ const CSS = `
   border: none;
   border-radius: 3px;
   color: var(--muted);
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   padding: 0;
-  font-size: 8px;
+  font-size: 7px;
   line-height: 1;
   cursor: pointer;
   font-family: inherit;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
+  opacity: 0.6;
   transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
-.gnode-section-head:hover .gnode-section-move { opacity: 0.8; }
 .gnode-section-move:hover { color: var(--text); background: rgba(255,255,255,0.10); opacity: 1; }
+/* "+" add-element button — same footprint as the move chevrons so the actions
+   row stays balanced */
+.gnode-section-add-btn {
+  background: rgba(255,255,255,0.06);
+  border: none;
+  border-radius: 3px;
+  color: var(--muted);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.gnode-section-add-btn:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.10);
+  opacity: 1;
+}
 .gnode-section-hidden-btn {
   font-size: 8px;
   letter-spacing: 0.16em;
@@ -489,8 +513,8 @@ const CSS = `
   color: var(--muted);
   background: rgba(255,255,255,0.06);
   border: none;
-  height: 22px;
-  padding: 0 10px;
+  height: 18px;
+  padding: 0 8px;
   border-radius: 3px;
   white-space: nowrap;
   cursor: pointer;
@@ -629,6 +653,39 @@ const CSS = `
 }
 .gnode-row.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
 .gnode-row.drop-after  { box-shadow: inset 0 -3px 0 0 var(--accent); }
+/* subheader + divider rows lay controls inline at the right (not in the left
+   gutter like widget rows) — they're short so overlapping absolute controls
+   would collide with each other and, for dividers, blur into the line */
+.gnode-row.is-subheader,
+.gnode-row.is-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.gnode-row.is-subheader { padding: 12px 0 4px; }
+.gnode-row.is-divider  { padding: 8px 0; }
+.gnode-subheader-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.gnode-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.gnode-row.is-subheader .gnode-row-hide,
+.gnode-row.is-subheader .gnode-row-drag,
+.gnode-row.is-divider .gnode-row-hide,
+.gnode-row.is-divider .gnode-row-drag {
+  position: static;
+  flex: 0 0 auto;
+}
 /* whole-section highlight when dragging a row into an empty column */
 .gnode-section.drop-section {
   box-shadow: inset 0 0 0 2px var(--accent);
@@ -1610,6 +1667,42 @@ function buildCard(node) {
     setDropSection(null);
   }
 
+  // shared row drag-to-reorder wiring — used by widget rows, subheader rows,
+  // and divider rows so all custom elements reorder identically. row.dataset
+  // .rowKey must be set beforehand; drop is committed via commitDomOrder().
+  function wireRowReorderDrag(row, dragHandle) {
+    dragHandle.addEventListener("mousedown", () => { row.draggable = true; });
+    row.addEventListener("dragstart", e => {
+      draggedRow = row;
+      e.dataTransfer.setData("text/plain", row.dataset.rowKey);
+      e.dataTransfer.effectAllowed = "move";
+      requestAnimationFrame(() => row.classList.add("dragging"));
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      row.draggable = false;
+      if (dropTarget && dropTarget !== row) {
+        const parent = dropTarget.parentNode;
+        if (dropPos === "before") parent.insertBefore(row, dropTarget);
+        else parent.insertBefore(row, dropTarget.nextSibling);
+      } else if (dropSection) {
+        dropSection.appendChild(row);
+      }
+      clearDropTarget();
+      draggedRow = null;
+      commitDomOrder();
+      renderBody();
+    });
+    row.addEventListener("dragover", e => {
+      if (!draggedRow || draggedRow === row) { e.preventDefault(); return; }
+      e.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const above = (e.clientY - rect.top) < rect.height / 2;
+      setDropTarget(row, above ? "before" : "after");
+    });
+    row.addEventListener("drop", e => { e.preventDefault(); });
+  }
+
   function commitDomOrder() {
     const sections = node.properties.sections || [];
     const sectionEls = body.querySelectorAll(".gnode-section");
@@ -1683,12 +1776,25 @@ function buildCard(node) {
         ? `${canMoveLeft ? `<button class="gnode-section-move" data-dir="-1" type="button" title="Move section left">◀</button>` : ""}
            ${canMoveRight ? `<button class="gnode-section-move" data-dir="1" type="button" title="Move section right">▶</button>` : ""}`
         : "";
+      const addChip = `
+        <button class="gnode-section-add-btn" type="button" title="Add element">+</button>
+        <div class="gnode-section-popover" data-role="add-popover">
+          <div class="item" data-el-type="subheader">
+            <span class="plus">H</span>
+            <span class="name">Header</span>
+          </div>
+          <div class="item" data-el-type="divider">
+            <span class="plus">—</span>
+            <span class="name">Divider</span>
+          </div>
+        </div>`;
       sec.innerHTML = `
         <div class="gnode-section-head">
           <span class="gnode-section-label" style="color:${s.color}">${escapeHtml(s.title)}</span>
           <div class="gnode-section-actions">
-            ${moveButtons}
+            ${addChip}
             ${hiddenChip}
+            ${moveButtons}
           </div>
         </div>
       `;
@@ -1715,6 +1821,39 @@ function buildCard(node) {
           node._gnodeSnapToFit?.();
         });
       });
+
+      // wire the "+" add-element dropdown (headers / dividers)
+      const addBtn = sec.querySelector(".gnode-section-add-btn");
+      const addPop = sec.querySelector('[data-role="add-popover"]');
+      if (addBtn && addPop) {
+        addBtn.addEventListener("click", e => {
+          e.stopPropagation();
+          body.querySelectorAll(".gnode-section-popover.open")
+            .forEach(p => { if (p !== addPop) p.classList.remove("open"); });
+          addPop.classList.toggle("open");
+        });
+        addPop.querySelectorAll(".item").forEach(item => {
+          item.addEventListener("click", e => {
+            e.stopPropagation();
+            const type = item.dataset.elType;
+            const id = Math.random().toString(36).slice(2, 10);
+            const key = type === "divider"
+              ? `__divider__\u001f${id}`
+              : `__subheader__\u001f${id}`;
+            s.widget_order = Array.isArray(s.widget_order) && s.widget_order.length
+              ? s.widget_order.slice()
+              : getSectionOrder(s);
+            s.widget_order.unshift(key);
+            if (type === "subheader") {
+              s.subheaders = s.subheaders || {};
+              s.subheaders[id] = "New Header";
+            }
+            addPop.classList.remove("open");
+            renderBody();
+            node._gnodeSnapToFit?.();
+          });
+        });
+      }
 
       // wire the per-section hidden-widgets popover
       if (sectionHidden.length > 0) {
@@ -1773,6 +1912,63 @@ function buildCard(node) {
       for (const key of order) {
         const sep = key.indexOf("\u001f");
         if (sep < 0) continue;
+
+        // user-authored group elements live in widget_order like widgets so
+        // drag-reorder works uniformly. their "nodeId" slot is a sentinel
+        // ("__subheader__" / "__divider__"); the second half is a unique id.
+        if (key.startsWith("__subheader__\u001f") || key.startsWith("__divider__\u001f")) {
+          const isDivider = key.startsWith("__divider__\u001f");
+          const id = key.slice(key.indexOf("\u001f") + 1);
+          const row = document.createElement("div");
+          row.className = "gnode-row " + (isDivider ? "is-divider" : "is-subheader");
+          row.dataset.rowKey = key;
+          row.dataset.sectionIdx = String(sIdx);
+          row.style.setProperty("--accent-color", s.color);
+
+          if (isDivider) {
+            row.innerHTML = `<div class="gnode-divider-line"></div>`;
+          } else {
+            const label = (s.subheaders?.[id]) || "";
+            row.innerHTML = `<div class="gnode-subheader-label" style="color:${s.color}">${escapeHtml(label)}</div>`;
+            const labelEl = row.querySelector(".gnode-subheader-label");
+            makeHeaderEditable(labelEl, () => (s.subheaders?.[id] || ""), (text) => {
+              s.subheaders = s.subheaders || {};
+              s.subheaders[id] = text;
+              renderBody();
+            });
+          }
+
+          // × removes this element from the section's order (and label map)
+          const delBtn = document.createElement("button");
+          delBtn.className = "gnode-row-hide";
+          delBtn.innerHTML = `<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 5 L8 5"/></svg>`;
+          delBtn.addEventListener("mousedown", e => e.stopPropagation());
+          delBtn.addEventListener("click", e => {
+            e.stopPropagation();
+            s.widget_order = (s.widget_order || getSectionOrder(s)).filter(k => k !== key);
+            if (!isDivider && s.subheaders) delete s.subheaders[id];
+            renderBody();
+            node._gnodeSnapToFit?.();
+          });
+          const dragHandle = document.createElement("div");
+          dragHandle.className = "gnode-row-drag";
+          dragHandle.innerHTML = `<svg viewBox="0 0 8 18" fill="currentColor">
+            <circle cx="2" cy="2" r="1"/><circle cx="6" cy="2" r="1"/>
+            <circle cx="2" cy="7" r="1"/><circle cx="6" cy="7" r="1"/>
+            <circle cx="2" cy="12" r="1"/><circle cx="6" cy="12" r="1"/>
+            <circle cx="2" cy="17" r="1"/><circle cx="6" cy="17" r="1"/>
+          </svg>`;
+          // controls sit on the LEFT (before label/line) so they mirror the
+          // widget-row gutter placement — flex order lets the visible children
+          // appear as [drag] [×] [content] regardless of markup insertion order
+          row.prepend(delBtn);
+          row.prepend(dragHandle);
+          wireRowReorderDrag(row, dragHandle);
+          sec.appendChild(row);
+          anyRows = true;
+          continue;
+        }
+
         const nodeId = parseInt(key.slice(0, sep), 10);
         const widgetName = key.slice(sep + 1);
         const wrapped = app.graph.getNodeById(nodeId);
@@ -1842,44 +2038,7 @@ function buildCard(node) {
         row.appendChild(hideBtn);
         row.appendChild(dragHandle);
 
-        // drag-to-reorder: nothing shifts during the drag. the dragged row
-        // dims in place; an inset accent line on the row under the cursor
-        // shows where the drop will land. actual reorder happens on drop.
-        dragHandle.addEventListener("mousedown", () => { row.draggable = true; });
-        row.addEventListener("dragstart", e => {
-          draggedRow = row;
-          e.dataTransfer.setData("text/plain", row.dataset.rowKey);
-          e.dataTransfer.effectAllowed = "move";
-          requestAnimationFrame(() => row.classList.add("dragging"));
-        });
-        row.addEventListener("dragend", () => {
-          row.classList.remove("dragging");
-          row.draggable = false;
-          // perform the actual move based on the tracked drop target
-          if (dropTarget && dropTarget !== row) {
-            const parent = dropTarget.parentNode;
-            if (dropPos === "before") parent.insertBefore(row, dropTarget);
-            else parent.insertBefore(row, dropTarget.nextSibling);
-          } else if (dropSection) {
-            // dropped into an empty section — append (the "no exposed widgets"
-            // placeholder gets cleared on next renderBody after commitDomOrder)
-            dropSection.appendChild(row);
-          }
-          clearDropTarget();
-          draggedRow = null;
-          commitDomOrder();
-          // renderBody rebuilds section markup so an "empty" section that just
-          // received its first row loses its placeholder cleanly
-          renderBody();
-        });
-        row.addEventListener("dragover", e => {
-          if (!draggedRow || draggedRow === row) { e.preventDefault(); return; }
-          e.preventDefault();
-          const rect = row.getBoundingClientRect();
-          const above = (e.clientY - rect.top) < rect.height / 2;
-          setDropTarget(row, above ? "before" : "after");
-        });
-        row.addEventListener("drop", e => { e.preventDefault(); });
+        wireRowReorderDrag(row, dragHandle);
 
         sec.appendChild(row);
         anyRows = true;
