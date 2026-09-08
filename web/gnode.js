@@ -168,11 +168,12 @@ const CSS = `
 }
 .gnode-btn:hover { color: var(--text); background: rgba(255,255,255,0.10); }
 .gnode-btn.primary {
-  background: var(--text);
+  background: #a8a8b0;
   color: #0b0b0f;
   font-weight: 700;
 }
-.gnode-btn.primary:hover { background: #fff; }
+.gnode-btn.primary:hover { background: var(--text); }
+.gnode-btn.primary:active { background: #fff; }
 
 .gnode-card-content {
   display: flex;
