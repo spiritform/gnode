@@ -446,7 +446,7 @@ const CSS = `
   flex: 1 1 0;
   /* absolute floor per section so widget content stays legible even when the
      user drags the card narrower — body's overflow-x picks up any deficit */
-  min-width: 260px;
+  min-width: 300px;
   border-bottom: none;
   border-right: 1px solid var(--line);
 }
@@ -507,6 +507,31 @@ const CSS = `
 .gnode-section-add-btn:hover {
   color: var(--text);
   background: rgba(255,255,255,0.10);
+  opacity: 1;
+}
+/* × delete-column button — same footprint as the other action chips; danger
+   tint on hover so it reads as destructive without being loud by default */
+.gnode-section-delete-btn {
+  background: rgba(255,255,255,0.06);
+  border: none;
+  border-radius: 3px;
+  color: var(--muted);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.gnode-section-delete-btn:hover {
+  color: var(--danger);
+  background: rgba(255,107,107,0.10);
   opacity: 1;
 }
 .gnode-section-hidden-btn {
@@ -1066,10 +1091,22 @@ function getGroupsArray() {
 // grab groups whose bbox contains any wrapped node, remove them from the graph
 function grabAndRemoveGroups(wrappedNodes) {
   const groups = getGroupsArray();
+  // ask LiteGraph to refresh each group's inside-nodes cache (some forks
+  // maintain `_nodes` lazily); we then union that with our bbox check so a
+  // node counts as inside if either source agrees.
+  for (const g of groups) {
+    try { g.recomputeInsideNodes?.(); } catch {}
+  }
   const snapshot = groups.slice();
   const grabbed = [];
+  const wrappedIds = new Set(wrappedNodes.map(n => n.id));
   for (const g of snapshot) {
-    const insideIds = wrappedNodes.filter(n => nodeInGroupBBox(n, g)).map(n => n.id);
+    const nativeIds = new Set(
+      Array.isArray(g._nodes) ? g._nodes.filter(n => wrappedIds.has(n.id)).map(n => n.id) : []
+    );
+    const bboxIds = wrappedNodes.filter(n => nodeInGroupBBox(n, g)).map(n => n.id);
+    const merged = new Set([...nativeIds, ...bboxIds]);
+    const insideIds = [...merged];
     if (insideIds.length === 0) continue;
     grabbed.push({
       title: g.title || "",
@@ -1803,6 +1840,11 @@ function buildCard(node) {
             <span class="name">Divider</span>
           </div>
         </div>`;
+      // delete only appears when there's a neighbor to merge into so the card
+      // always has at least one section
+      const deleteBtn = sections.length > 1
+        ? `<button class="gnode-section-delete-btn" type="button" title="Delete column">×</button>`
+        : "";
       sec.innerHTML = `
         <div class="gnode-section-head">
           <span class="gnode-section-label" style="color:${s.color}">${escapeHtml(s.title)}</span>
@@ -1810,6 +1852,7 @@ function buildCard(node) {
             ${hiddenChip}
             ${addChip}
             ${moveButtons}
+            ${deleteBtn}
           </div>
         </div>
       `;
@@ -1836,6 +1879,42 @@ function buildCard(node) {
           node._gnodeSnapToFit?.();
         });
       });
+
+      // wire the × delete-column button: merge into the neighbor so any
+      // wrapped-node ids + widget order + hidden state stay reachable, then
+      // drop this section. neighbor preference: previous section, else next.
+      const delSecBtn = sec.querySelector(".gnode-section-delete-btn");
+      if (delSecBtn) {
+        delSecBtn.addEventListener("click", e => {
+          e.stopPropagation();
+          const arr = node.properties.sections;
+          if (arr.length <= 1) return;
+          const doomed = arr[sIdx];
+          const targetIdx = sIdx > 0 ? sIdx - 1 : 1;
+          const target = arr[targetIdx];
+          // snapshot current widget_order so cross-section drags survive
+          target.widget_order = Array.isArray(target.widget_order) && target.widget_order.length
+            ? target.widget_order.slice()
+            : getSectionOrder(target);
+          const doomedOrder = Array.isArray(doomed.widget_order) && doomed.widget_order.length
+            ? doomed.widget_order.slice()
+            : getSectionOrder(doomed);
+          for (const key of doomedOrder) {
+            if (!target.widget_order.includes(key)) target.widget_order.push(key);
+          }
+          target.node_ids = target.node_ids || [];
+          for (const nid of doomed.node_ids || []) {
+            if (!target.node_ids.includes(nid)) target.node_ids.push(nid);
+          }
+          if (doomed.subheaders) {
+            target.subheaders = { ...(target.subheaders || {}), ...doomed.subheaders };
+          }
+          arr.splice(sIdx, 1);
+          renderBody();
+          applyLayout();
+          node._gnodeSnapToFit?.();
+        });
+      }
 
       // wire the "+" add-element dropdown (headers / dividers)
       const addBtn = sec.querySelector(".gnode-section-add-btn");
@@ -2115,10 +2194,15 @@ function buildCard(node) {
   // expose so onResize can snap corner-drag back to the required width and
   // the card stays contained inside the LiteGraph node body.
   node._gnodeRequiredWidth = computeRequiredWidth;
-  // expose so the initial mount can force-shrink a stale saved width down to
-  // whatever the card actually needs. subsequent snap-to-fit calls only touch
-  // height so a user drag-wider isn't undone by hide/restore/reorder.
-  node._gnodeSyncWidth = syncNodeWidth;
+  // expose so the initial mount can grow a stale-narrow saved width up to
+  // the current TARGET (never shrink — a user-dragged wider size is respected)
+  node._gnodeSyncWidth = () => {
+    const target = computeTargetWidth();
+    if (node.size[0] < target) {
+      node.size[0] = target;
+      node.setDirtyCanvas?.(true, true);
+    }
+  };
 
   function renderInputs() {
     if (!inputsInner) return;
@@ -2464,13 +2548,38 @@ function buildCard(node) {
   // section has ~380px to breathe — side columns (inputs / previews) sit at
   // their own widths and computeRequiredWidth sums everything.
   function currentSectionCount() { return (node.properties.sections || []).length; }
+  // two per-section widths: a comfortable TARGET the card sizes to when it
+  // mounts or gains a column, and a hard MIN the user can shrink down to.
+  // between them, sections keep breathing room; below MIN, body scrolls
+  // horizontally so the sections don't collapse into unreadable slivers.
+  const SECTION_TARGET_W = 380;
+  const SECTION_MIN_W = 300;
+  function extrasWidth() {
+    let w = 0;
+    if (el.classList.contains("with-inputs")) {
+      w += (parseInt(el.style.getPropertyValue("--iw")) || INPUTS_COL_W) + SEPARATOR_W;
+    }
+    if (el.classList.contains("with-previews")) {
+      w += (parseInt(el.style.getPropertyValue("--pw")) || PREVIEW_COL_W) + SEPARATOR_W;
+    }
+    return w;
+  }
+  function computeTargetWidth() {
+    const count = currentSectionCount();
+    return Math.max(BODY_W, count * SECTION_TARGET_W) + extrasWidth();
+  }
   function applyLayout() {
-    // per-section footprint matches the CSS min-width so the node's minimum
-    // stays consistent with what the sections can actually shrink to. user
-    // can drag wider than this; body's overflow-x handles anything narrower.
-    const bodyW = Math.max(BODY_W, currentSectionCount() * 260);
-    el.style.setProperty("--body-w", `${bodyW}px`);
-    syncNodeWidth(true);
+    // --body-w drives the CSS flex-basis + the onResize min clamp; keep it at
+    // MIN so users can drag the card narrower than the initial spread
+    const bodyMin = Math.max(BODY_W, currentSectionCount() * SECTION_MIN_W);
+    el.style.setProperty("--body-w", `${bodyMin}px`);
+    // grow to TARGET width if we're currently smaller (fresh wrap / add-column
+    // paths). never shrink here — that would fight a wider user-dragged size.
+    const target = computeTargetWidth();
+    if (node.size[0] < target) {
+      node.size[0] = target;
+      node.setDirtyCanvas?.(true, true);
+    }
   }
   applyLayout();
 
@@ -2678,6 +2787,14 @@ function wrapSelection() {
     }
     gnode.pos = [bbox.minX, bbox.minY];
     gnode.size = [...DEFAULT_SIZE];
+    // remember the original bbox center — buildCard grows node.size to fit
+    // content asynchronously, so we re-shift after mount to keep the card
+    // roughly centered on where the source selection lived (otherwise a wide
+    // 3-column card can extend well beyond the original right edge)
+    gnode._gnodeInitialCenter = [
+      bbox.minX + (bbox.maxX - bbox.minX) / 2,
+      bbox.minY,
+    ];
     gnode.properties.wrapped_ids = selected.map(n => n.id);
     gnode.properties.saved_positions = savedPositions;
     gnode.properties.saved_groups = grabbedGroups;
@@ -2795,13 +2912,20 @@ app.registerExtension({
               this.size[1] = target;
               this.setDirtyCanvas?.(true, true);
             };
-            // on first mount, also force width down to what the card needs —
-            // otherwise a workflow saved wide leaves a colored margin around
-            // the card until the user drags a corner. re-mounts (refresh) hit
-            // the same path so this covers "fixes on refresh" too.
+            // on first mount, grow width up to TARGET if the saved / default
+            // size is narrower than what the sections need to breathe. never
+            // shrinks — a user-dragged wider size stays.
             const initialFit = () => {
-              this._gnodeSyncWidth?.(true);
+              this._gnodeSyncWidth?.();
               snapToFit();
+              // on brand-new wraps the card grows past the source-selection
+              // bbox; re-center on the remembered bbox center so the right
+              // side doesn't hang off the visible canvas
+              if (Array.isArray(this._gnodeInitialCenter)) {
+                this.pos[0] = this._gnodeInitialCenter[0] - this.size[0] / 2;
+                delete this._gnodeInitialCenter;
+                this.setDirtyCanvas?.(true, true);
+              }
             };
             requestAnimationFrame(() => requestAnimationFrame(initialFit));
             // expose so content-mutating actions (hide row, restore row, reorder, layout flip)
