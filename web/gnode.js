@@ -1632,6 +1632,31 @@ function buildCard(node) {
     node._gnodeSnapToFit?.();
   }
 
+  // per-widget label overrides — user renames a row's label ("TEXT" → "STYLE
+  // PROMPT") without touching the underlying widget name (which comfy uses
+  // as the graph key).
+  function ensureLabelArray() {
+    node.properties.widget_labels = node.properties.widget_labels || [];
+    return node.properties.widget_labels;
+  }
+  function getWidgetLabel(nodeId, widgetName) {
+    const arr = node.properties.widget_labels;
+    if (!Array.isArray(arr)) return null;
+    const hit = arr.find(h => h.node_id == nodeId && h.widget_name === widgetName);
+    return hit ? hit.label : null;
+  }
+  function setWidgetLabel(nodeId, widgetName, label) {
+    const arr = ensureLabelArray();
+    const idx = arr.findIndex(h => h.node_id == nodeId && h.widget_name === widgetName);
+    if (!label) {
+      if (idx >= 0) arr.splice(idx, 1);
+    } else if (idx >= 0) {
+      arr[idx].label = label;
+    } else {
+      arr.push({ node_id: nodeId, widget_name: widgetName, label });
+    }
+  }
+
   function isPreviewNode(w) {
     if (!w || INPUT_TYPES.has(w.type)) return false;
     const t = String(w.type || "").toLowerCase();
@@ -2111,6 +2136,16 @@ function buildCard(node) {
           if (skippedInBody.has(`${wrapped.id}\u001f${w.name}`)) continue;
           row = renderWidgetRow(wrapped, w);
           hideName = w.name;
+          const labelEl = row.querySelector(".k");
+          if (labelEl) {
+            const override = getWidgetLabel(wrapped.id, w.name);
+            if (override) labelEl.textContent = override;
+            const defaultLabel = w.label || w.name || "widget";
+            makeHeaderEditable(labelEl, () => getWidgetLabel(wrapped.id, w.name) || defaultLabel, (text) => {
+              setWidgetLabel(wrapped.id, w.name, text && text !== defaultLabel ? text : "");
+              renderBody();
+            });
+          }
         }
 
         row.style.setProperty("--accent-color", s.color);
@@ -2550,9 +2585,26 @@ function buildCard(node) {
   }
   const onExecuting = ({ detail }) => markExecuting(detail);
   api.addEventListener("executing", onExecuting);
+  // some nodes mutate widget values during execution (pysssss ShowText fills
+  // its `text` widget from the message payload). rerender body when a wrapped
+  // node finishes so those updates surface. skip if the user is editing a
+  // text field inside body — we'd blow away their in-progress typing.
+  const onExecuted = ({ detail }) => {
+    const nid = detail?.display_node ?? detail?.node;
+    if (nid == null) return;
+    const sections = node.properties.sections || [];
+    const wrapped = sections.some(s => (s.node_ids || []).some(id => id == nid));
+    if (!wrapped) return;
+    const ae = document.activeElement;
+    if (ae && body.contains(ae) &&
+        (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT" || ae.isContentEditable)) return;
+    renderBody();
+  };
+  api.addEventListener("executed", onExecuted);
   const prevRemove = node.onRemoved;
   node.onRemoved = function () {
     api.removeEventListener("executing", onExecuting);
+    api.removeEventListener("executed", onExecuted);
     prevRemove?.call(this);
   };
 
