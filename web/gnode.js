@@ -1461,7 +1461,16 @@ function renderWidgetRow(node, widget) {
         const done = keep => {
           if (keep) {
             const n = parseFloat(input.value);
-            if (!isNaN(n)) { current = snap(clamp(n)); commit(current); }
+            if (!isNaN(n)) {
+              // typed values honor bounds but skip scrub-step snapping so
+              // resolutions like 928 don't get rounded to a step multiple
+              // (e.g. 960 when the widget declares step=64). integer
+              // widgets (decimals=0) still round to a whole number.
+              let v = clamp(n);
+              if (decimals === 0) v = Math.round(v);
+              current = v;
+              commit(current);
+            }
           }
           input.replaceWith(box);
           paint();
