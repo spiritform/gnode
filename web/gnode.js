@@ -1372,19 +1372,22 @@ function renderWidgetRow(node, widget) {
     // cfg=100, LoRA strength=-100..100). pin common ones to sensible
     // caps so the drag range feels real. user can still type a higher
     // value via dbl-click if they really want.
-    const MAX_OVERRIDES = { steps: 50, cfg: 20, strength_model: 1, strength_clip: 1 };
+    // stacked LoRA loaders suffix duplicates (strength_model_1, _2…), so
+    // match on the normalized base name.
+    const baseName = String(widget.name || "").replace(/_\d+$/, "");
+    const MAX_OVERRIDES = { steps: 50, cfg: 20, strength_model: 2, strength_clip: 2 };
     const MIN_OVERRIDES = { strength_model: 0, strength_clip: 0 };
-    if (MAX_OVERRIDES[widget.name] !== undefined) {
-      max = Math.min(max, MAX_OVERRIDES[widget.name]);
+    if (MAX_OVERRIDES[baseName] !== undefined) {
+      max = Math.min(max, MAX_OVERRIDES[baseName]);
     }
-    if (MIN_OVERRIDES[widget.name] !== undefined) {
-      min = Math.max(min, MIN_OVERRIDES[widget.name]);
+    if (MIN_OVERRIDES[baseName] !== undefined) {
+      min = Math.max(min, MIN_OVERRIDES[baseName]);
     }
     // some widgets have oversized step (e.g. steps=10 -> jumps by 10s). pin
     // to a sensible tick so the scrub feels granular.
     const STEP_OVERRIDES = { steps: 1, cfg: 0.1, denoise: 0.01, strength_model: 0.05, strength_clip: 0.05 };
-    if (STEP_OVERRIDES[widget.name] !== undefined) {
-      step = STEP_OVERRIDES[widget.name];
+    if (STEP_OVERRIDES[baseName] !== undefined) {
+      step = STEP_OVERRIDES[baseName];
     }
     // bounded widgets (steps, cfg, denoise…) get a fill bar visualizing where
     // the value sits in [min, max]. unbounded ones (seed) skip the fill and
