@@ -878,7 +878,6 @@ const CSS = `
   background: var(--accent-color, var(--accent));
   opacity: 0.22;
   pointer-events: none;
-  transition: width 0.05s linear;
 }
 .gnode-slider-box > .val {
   position: relative;
