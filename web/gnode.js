@@ -1174,6 +1174,40 @@ function inferSections(wrappedNodes, grabbedGroups) {
     nodes.forEach(n => assigned.add(n.id));
   }
 
+  // pull ungrouped nodes into a section they're wired to, so a stray node
+  // sitting just outside a group's bbox still lands in the same column as
+  // its neighbor. iterate to propagate through orphan chains (A → B → sec)
+  const links = app.graph?.links || {};
+  const neighborIdsOf = n => {
+    const out = new Set();
+    for (const inp of (n.inputs || [])) {
+      const l = inp && inp.link != null ? links[inp.link] : null;
+      if (l) out.add(l.origin_id);
+    }
+    for (const outp of (n.outputs || [])) {
+      for (const lid of (outp?.links || [])) {
+        const l = links[lid];
+        if (l) out.add(l.target_id);
+      }
+    }
+    return out;
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const n of wrappedNodes) {
+      if (assigned.has(n.id)) continue;
+      const neighbors = neighborIdsOf(n);
+      if (neighbors.size === 0) continue;
+      const sec = sections.find(s => s.node_ids.some(id => neighbors.has(id)));
+      if (sec) {
+        sec.node_ids.push(n.id);
+        assigned.add(n.id);
+        changed = true;
+      }
+    }
+  }
+
   const ungrouped = wrappedNodes.filter(n => !assigned.has(n.id));
   // only spawn the fallback section if the ungrouped nodes actually have
   // renderable widgets — no point showing an empty "no exposed widgets" bucket
@@ -1834,6 +1868,24 @@ function buildCard(node) {
   }
 
   function renderBody() {
+    try {
+      _renderBodyInner();
+    } catch (err) {
+      // last-resort: never leave the card empty if a section/row throws (e.g.
+      // a workflow loaded with missing custom-node types leaves stub widgets
+      // that misbehave). log and paint a recovery button so the user can retry
+      console.error("[GNODE] renderBody failed:", err);
+      body.innerHTML = `
+        <div class="gnode-empty" style="padding:16px; text-align:center">
+          <div style="margin-bottom:8px">Failed to render this GNODE.</div>
+          <div style="font-size:11px; opacity:0.7; margin-bottom:12px">${escapeHtml(String(err?.message || err))}</div>
+          <button class="gnode-section-add-btn" type="button" data-role="gnode-retry">retry</button>
+        </div>`;
+      body.querySelector('[data-role="gnode-retry"]')?.addEventListener("click", () => renderBody());
+    }
+  }
+
+  function _renderBodyInner() {
     // preserve an in-progress rename — see same guard in renderPreviews()
     if (body.contains(document.activeElement) &&
         document.activeElement.isContentEditable) return;
@@ -1847,6 +1899,7 @@ function buildCard(node) {
     }
 
     sections.forEach((s, sIdx) => {
+     try {
       const sec = document.createElement("div");
       sec.className = "gnode-section";
       sec.style.setProperty("--accent-color", s.color);
@@ -2041,6 +2094,7 @@ function buildCard(node) {
       let anyRows = false;
       const order = getSectionOrder(s);
       for (const key of order) {
+        try {
         const sep = key.indexOf("\u001f");
         if (sep < 0) continue;
 
@@ -2183,6 +2237,17 @@ function buildCard(node) {
 
         sec.appendChild(row);
         anyRows = true;
+        } catch (rowErr) {
+          // one bad row shouldn't take down the whole section — log it, paint
+          // a tiny placeholder in its slot, and keep rendering the rest
+          console.warn("[GNODE] row render failed:", key, rowErr);
+          const bad = document.createElement("div");
+          bad.className = "gnode-row is-error";
+          bad.style.opacity = "0.5";
+          bad.textContent = "⚠ row failed";
+          sec.appendChild(bad);
+          anyRows = true;
+        }
       }
 
       if (!anyRows) {
@@ -2193,6 +2258,14 @@ function buildCard(node) {
         sec.appendChild(em);
       }
       body.appendChild(sec);
+     } catch (secErr) {
+       // one bad section shouldn't tank the whole card — log + placeholder
+       console.warn("[GNODE] section render failed:", s?.title, secErr);
+       const bad = document.createElement("div");
+       bad.className = "gnode-section is-error";
+       bad.innerHTML = `<div class="gnode-empty" style="padding:16px">⚠ section "${escapeHtml(s?.title || "")}" failed</div>`;
+       body.appendChild(bad);
+     }
     });
   }
 
