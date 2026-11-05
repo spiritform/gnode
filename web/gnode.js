@@ -873,10 +873,24 @@ const CSS = `
 .gnode-slider-box::before {
   content: "";
   position: absolute;
-  top: 0; left: 0; bottom: 0;
+  top: 0; bottom: 0;
+  left: var(--fill-left, 0%);
   width: var(--pct, 0%);
   background: var(--accent-color, var(--accent));
   opacity: 0.22;
+  pointer-events: none;
+}
+/* ranges that cross zero (e.g. diffsynth controlnet strength, -10..10) fill
+   outward from the zero point instead of from min, so 0 reads as empty and
+   negative values fill leftward. hairline marks where zero sits. */
+.gnode-slider-box.signed::after {
+  content: "";
+  position: absolute;
+  top: 2px; bottom: 2px;
+  left: var(--zero, 50%);
+  width: 1px;
+  background: var(--line-strong);
+  opacity: 0.6;
   pointer-events: none;
 }
 .gnode-slider-box > .val {
@@ -1400,7 +1414,15 @@ function renderWidgetRow(node, widget) {
   } else if (type === "number" || type === "slider") {
     let min = widget.options?.min ?? 0;
     let max = widget.options?.max ?? 100;
-    let step = widget.options?.step ?? 1;
+    // ComfyUI's frontend stores options.step as a *display* step — the value
+    // declared in INPUT_TYPES multiplied by 10 — and keeps the real increment
+    // in options.step2 (plus options.precision for the decimal count). Reading
+    // options.step raw made every scrub 10x coarser than the node itself:
+    // QwenImageDiffsynthControlnet strength (step 0.01) snapped to 0.1, and
+    // start/end_percent (step 0.001) snapped to 0.01.
+    let step = widget.options?.step2
+      ?? (widget.options?.step != null ? widget.options.step / 10 : 1);
+    const precision = widget.options?.precision;
     // some widgets ship absurd default ranges (KSampler steps=10000,
     // cfg=100, LoRA strength=-100..100). pin common ones to sensible
     // caps so the drag range feels real. user can still type a higher
@@ -1434,18 +1456,31 @@ function renderWidgetRow(node, widget) {
       label.className = "val";
       box.appendChild(label);
       let current = Number(widget.value);
-      const decimals = step < 1 ? Math.min(4, String(step).split(".")[1]?.length || 2) : 0;
+      const decimals = Number.isInteger(precision)
+        ? Math.min(4, precision)
+        : (step < 1 ? Math.min(4, String(step).split(".")[1]?.length || 2) : 0);
       const format = n => decimals > 0 ? Number(n).toFixed(decimals) : String(Math.round(n));
       const clamp = bounded
         ? n => Math.max(min, Math.min(max, n))
         : n => Math.max(-Number.MAX_SAFE_INTEGER, Math.min(Number.MAX_SAFE_INTEGER, n));
       const snap = n => (step > 0 ? Math.round(n / step) * step : n);
+      const signed = bounded && min < 0 && max > 0;
+      const toPct = n => ((n - min) / (max - min)) * 100;
+      if (signed) {
+        box.classList.add("signed");
+        box.style.setProperty("--zero", toPct(0) + "%");
+      }
       const paint = () => {
-        if (bounded) {
-          const pct = ((current - min) / (max - min)) * 100;
-          box.style.setProperty("--pct", pct + "%");
-        } else {
+        if (!bounded) {
+          box.style.setProperty("--fill-left", "0%");
           box.style.setProperty("--pct", "0%");
+        } else if (signed) {
+          const zero = toPct(0), cur = toPct(current);
+          box.style.setProperty("--fill-left", Math.min(zero, cur) + "%");
+          box.style.setProperty("--pct", Math.abs(cur - zero) + "%");
+        } else {
+          box.style.setProperty("--fill-left", "0%");
+          box.style.setProperty("--pct", toPct(current) + "%");
         }
         label.textContent = format(current);
       };
