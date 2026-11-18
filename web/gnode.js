@@ -1055,6 +1055,59 @@ function getSelectedNodes() {
   return Object.values(app.canvas.selected_nodes || {});
 }
 
+// A SubgraphNode must never be wrapped. When one is present in the graph it
+// claims any DOM widget it resolves as "promoted" via
+// useDomWidgetStore().setPositionOverride(), after which ComfyUI's
+// DomWidgets.vue sizes and positions that element from the SubgraphNode
+// instead of its own node:
+//   posWidget = override.widget; posNode = override.node
+//   size = [(posWidget.width ?? posNode.width) - margin*2, ...]
+// The GNODE card then detaches from node.size[0] — it stays at its old width
+// while the node body keeps growing, leaving sections clipped and a dead
+// colored strip on the right. Keep subgraphs out of GNODEs entirely.
+function isSubgraphNode(n) {
+  if (!n) return false;
+  try {
+    if (typeof n.isSubgraphNode === "function" && n.isSubgraphNode()) return true;
+  } catch { /* older frontends: fall through to the duck-typed checks */ }
+  if (n.subgraph) return true;
+  return n.type === "SubgraphNode" || n.constructor?.name === "SubgraphNode";
+}
+
+// the one predicate every wrap / send path filters on
+function isWrappable(n) {
+  return !!n && n.type !== GNODE_TYPE && !isSubgraphNode(n);
+}
+
+// drop unwrappable nodes and tell the user which ones went, so a silently
+// skipped subgraph doesn't look like a bug
+function filterWrappable(nodes, action) {
+  const keep = [];
+  const skipped = [];
+  for (const n of nodes || []) {
+    if (n && n.type === GNODE_TYPE) continue;
+    if (isWrappable(n)) keep.push(n);
+    else if (n) skipped.push(n);
+  }
+  if (skipped.length) {
+    const names = skipped.map(n => n.title || n.type || `#${n.id}`).join(", ");
+    console.warn(`[GNODE] ${action}: skipped subgraph node(s) — ${names}. ` +
+      "Subgraphs hijack DOM widget layout and break the card; expand the subgraph first.");
+    const detail = skipped.length === 1
+      ? `"${names}" is a subgraph and was left out.`
+      : `${skipped.length} subgraph nodes were left out: ${names}.`;
+    try {
+      app.extensionManager?.toast?.add({
+        severity: "warn",
+        summary: "GNODE: subgraph skipped",
+        detail,
+        life: 6000,
+      });
+    } catch { /* toast API is optional */ }
+  }
+  return keep;
+}
+
 function boundingBoxOf(nodes) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const n of nodes) {
@@ -2934,7 +2987,7 @@ function openLightbox(src) {
 /* ---------- wrap flow ---------- */
 
 function wrapSelection() {
-  const selected = getSelectedNodes().filter(n => n.type !== GNODE_TYPE);
+  const selected = filterWrappable(getSelectedNodes(), "wrap");
   console.log("[GNODE] wrapSelection: selection count =", selected.length);
   if (selected.length < 2) {
     console.warn("[GNODE] select 2+ nodes to wrap.");
@@ -3188,8 +3241,7 @@ app.registerExtension({
 });
 
 function addWrapMenuItem(opts, canvas) {
-  const selected = Object.values(canvas.selected_nodes || {})
-    .filter(n => n.type !== GNODE_TYPE);
+  const selected = Object.values(canvas.selected_nodes || {}).filter(isWrappable);
   if (selected.length < 2) return;
   opts.unshift(null);
   opts.unshift({
@@ -3204,6 +3256,8 @@ function listGNodes() {
 }
 
 function sendNodesToGNode(sourceNodes, gnode, targetSection) {
+  sourceNodes = filterWrappable(sourceNodes, "send to GNODE");
+  if (sourceNodes.length === 0) return;
   const props = gnode.properties;
   props.wrapped_ids = Array.isArray(props.wrapped_ids) ? props.wrapped_ids : [];
   props.saved_positions = props.saved_positions || {};
@@ -3227,7 +3281,7 @@ function sendNodesToGNode(sourceNodes, gnode, targetSection) {
   }
 
   for (const src of sourceNodes) {
-    if (src.type === GNODE_TYPE) continue;
+    if (!isWrappable(src)) continue;
     if (!props.wrapped_ids.includes(src.id)) props.wrapped_ids.push(src.id);
     if (!props.saved_positions[src.id]) {
       props.saved_positions[src.id] = [src.pos[0], src.pos[1]];
@@ -3256,8 +3310,8 @@ function addSendToGNodeMenuItem(opts, canvas, node) {
   if (gnodes.length === 0) return;
 
   // if this menu was opened on a node, use canvas selection if it includes the node, else just this node
-  let sources = Object.values(canvas.selected_nodes || {}).filter(n => n.type !== GNODE_TYPE);
-  if (node && !sources.includes(node)) sources = [node];
+  let sources = Object.values(canvas.selected_nodes || {}).filter(isWrappable);
+  if (node && !sources.includes(node)) sources = isWrappable(node) ? [node] : [];
   if (sources.length === 0) return;
 
   const label = sources.length === 1
